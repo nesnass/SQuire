@@ -1,0 +1,16 @@
+<?xml version='1.0' standalone='yes'?>
+<extensions>
+  <id>820f08f5-d556-407b-b9a0-4c5be51dd488</id>
+  <module>Plugins::Squire::Plugin</module>
+  <name>Squire</name>
+  <description>A mobile-first web skin</description>
+  <creator>Richard Nesnass</creator>
+  <version>0.1.0</version>
+  <defaultState>enabled</defaultState>
+  <type>2</type>
+  <targetApplication>
+    <minVersion>8.0.0</minVersion>
+    <maxVersion>*</maxVersion>
+    <id>SlimServer</id>
+  </targetApplication>
+</extensions>

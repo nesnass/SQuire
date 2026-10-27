@@ -1,0 +1,27 @@
+{
+  "name": "lms-squire",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vue-tsc --noEmit && vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "icons": "for s in 180:apple-touch-icon 192:icon-192 512:icon-512; do rsvg-convert -w ${s%%:*} -h ${s%%:*} public/icon.svg -o public/${s##*:}.png; done"
+  },
+  "dependencies": {
+    "@vue/devtools-api": "^8.2.1",
+    "vue": "^3.5.44"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.6.5",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5",
+    "vue-tsc": "^3.3.13"
+  }
+}
