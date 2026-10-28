@@ -7,6 +7,9 @@ const TRACK_TAGS = 'tags:acdlKorITuxN'
 const POLL_MS = 2000
 const QUEUE_PAGE = 200
 const PLAYER_KEY = 'squire.playerId'
+// Kept on the server as a player pref so a disabled player stays disabled on every device
+const DISABLED_PREF = 'plugin.squire:disabled'
+const DISABLED_POLL_MS = 30_000
 
 export interface RoomMember {
   id: string
@@ -24,6 +27,12 @@ export interface Room {
   track?: Track
   isPlaying: boolean
   volume: number
+}
+
+export interface DisabledPlayer {
+  id: string
+  name: string
+  isPlaying: boolean
 }
 
 interface Snapshot {
@@ -54,14 +63,23 @@ function usePlayerStore() {
   const reachable = ref<boolean | null>(null)
   // A host app can limit the skin to one player, by name
   const focusName = ref<string | null>(null)
+  // Players hidden from rooms and never targeted, to avoid playing on the wrong device
+  const disabledIds = ref<string[]>([])
   const now = ref(performance.now())
 
   let queueKey = ''
+  let disabledKey = ''
+  let disabledAt = 0
   // Polls that started before the latest command are discarded so they can't undo optimistic updates
   let lastMutation = 0
   let started = false
 
   const focusId = computed(() => players.value.find((p) => p.name === focusName.value)?.playerid ?? null)
+
+  // The host app's own player stays usable even if disabled elsewhere
+  function isDisabled(id: string): boolean {
+    return id !== focusId.value && disabledIds.value.includes(id)
+  }
 
   const rooms = computed<Room[]>(() => {
     const order = players.value.map((p) => p.playerid)
@@ -72,6 +90,8 @@ function usePlayerStore() {
       ...order.filter((id) => !grouped.has(id)).map((id) => [id]),
     ]
       .filter((ids) => !focus || ids.includes(focus))
+      .map((ids) => ids.filter((id) => !isDisabled(id)))
+      .filter((ids) => ids.length)
       .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]))
 
     return sets.map((ids) => {
@@ -102,10 +122,22 @@ function usePlayerStore() {
 
   const getters = {
     players: computed(() => players.value),
+    enabledPlayers: computed(() => players.value.filter((p) => !isDisabled(p.playerid))),
+    disabledPlayers: computed<DisabledPlayer[]>(() =>
+      players.value
+        .filter((p) => isDisabled(p.playerid))
+        .map((p) => ({
+          id: p.playerid,
+          name: p.name,
+          isPlaying: snapshots.value[p.playerid]?.status?.mode === 'play',
+        })),
+    ),
     rooms,
     activeId: computed(() => activeId.value),
     // Plugin menus need a player to answer; any connected one will do before a room is picked
-    menuPlayerId: computed(() => activeId.value ?? players.value.find((p) => p.connected)?.playerid ?? null),
+    menuPlayerId: computed(
+      () => activeId.value ?? players.value.find((p) => p.connected && !isDisabled(p.playerid))?.playerid ?? null,
+    ),
     activeRoom,
     // Active player's name leads, since that's the one the user picked
     activeLabel: computed(() => {
@@ -169,6 +201,22 @@ function usePlayerStore() {
     if (id === activeId.value) queue.value = res.playlist_loop ?? []
   }
 
+  // Player prefs need a query each, so they're read less often than status; null when skipped
+  async function fetchDisabled(ids: string[]): Promise<string[] | null> {
+    const key = ids.join(',')
+    if (key === disabledKey && performance.now() - disabledAt < DISABLED_POLL_MS) return null
+    const flags = await Promise.all(
+      ids.map((id) =>
+        lmsQuery<{ _p2: string | null }>(id, ['playerpref', DISABLED_PREF, '?'])
+          .then((r) => r._p2 === '1')
+          .catch(() => isDisabled(id)),
+      ),
+    )
+    disabledKey = key
+    disabledAt = performance.now()
+    return ids.filter((_, i) => flags[i])
+  }
+
   async function refresh() {
     const startedAt = performance.now()
     try {
@@ -178,16 +226,20 @@ function usePlayerStore() {
       ])
       reachable.value = true
       const connected = (pl.players_loop ?? []).filter((p) => p.connected)
-      const results = await Promise.all(
-        connected.map((p) =>
-          lmsQuery<StatusResponse>(p.playerid, ['status', '-', 1, TRACK_TAGS])
-            .then((status) => [p.playerid, status] as const)
-            .catch(() => null),
+      const [results, disabled] = await Promise.all([
+        Promise.all(
+          connected.map((p) =>
+            lmsQuery<StatusResponse>(p.playerid, ['status', '-', 1, TRACK_TAGS])
+              .then((status) => [p.playerid, status] as const)
+              .catch(() => null),
+          ),
         ),
-      )
+        fetchDisabled((pl.players_loop ?? []).map((p) => p.playerid)),
+      ])
       if (lastMutation > startedAt) return
 
       players.value = pl.players_loop ?? []
+      if (disabled) disabledIds.value = disabled
       syncGroups.value = (sg.syncgroups_loop ?? []).map((g) => g.sync_members.split(','))
       const fetchedAt = performance.now()
       const next: Record<string, Snapshot> = {}
@@ -199,8 +251,9 @@ function usePlayerStore() {
       const focus = focusId.value
       if (focus && activeId.value !== focus) {
         actions.selectPlayer(focus)
-      } else if (!activeId.value || !ids.includes(activeId.value)) {
-        actions.selectPlayer(players.value.find((p) => p.isplaying)?.playerid ?? connected[0]?.playerid ?? null)
+      } else if (!activeId.value || !ids.includes(activeId.value) || isDisabled(activeId.value)) {
+        const usable = connected.filter((p) => !isDisabled(p.playerid))
+        actions.selectPlayer(usable.find((p) => p.isplaying)?.playerid ?? usable[0]?.playerid ?? null)
       }
       await refreshQueue()
     } catch (e) {
@@ -289,8 +342,25 @@ function usePlayerStore() {
     },
     async pauseAll() {
       const playing = rooms.value.filter((r) => r.isPlaying)
+      // Disabled players aren't in rooms, but something else may have started them
+      const hidden = getters.disabledPlayers.value.filter((p) => p.isPlaying).map((p) => p.id)
       for (const r of playing) patch(memberIds(r.id), { mode: 'pause' })
-      await Promise.all(playing.map((r) => send(r.members[0].id, ['pause', 1], false)))
+      patch(hidden, { mode: 'pause' })
+      await Promise.all([...playing.map((r) => r.members[0].id), ...hidden].map((id) => send(id, ['pause', 1], false)))
+      await refresh()
+    },
+    // A disabled player leaves its group and stops, so it can't keep playing out of sight
+    async setDisabled(playerId: string, disabled: boolean) {
+      const wasPlaying = snapshots.value[playerId]?.status?.mode === 'play'
+      const grouped = syncGroups.value.some((g) => g.includes(playerId))
+      lastMutation = performance.now()
+      disabledIds.value = disabled
+        ? [...new Set([...disabledIds.value, playerId])]
+        : disabledIds.value.filter((id) => id !== playerId)
+      disabledAt = performance.now()
+      await lmsCommand(playerId, ['playerpref', DISABLED_PREF, disabled ? 1 : 0])
+      if (disabled && grouped) await send(playerId, ['sync', '-'], false)
+      if (disabled && wasPlaying) await send(playerId, ['pause', 1], false)
       await refresh()
     },
     async playAll() {

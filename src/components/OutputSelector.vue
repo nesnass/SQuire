@@ -48,7 +48,7 @@ async function done(close: () => void) {
       <fieldset class="px-2 py-2">
         <legend class="sr-only">Rooms to play on</legend>
         <label
-          v-for="p in getters.players.value"
+          v-for="p in getters.enabledPlayers.value"
           :key="p.playerid"
           class="flex min-h-14 items-center gap-3 rounded-xl px-3 active:bg-neutral-800"
           :class="{ 'opacity-40': !p.connected }"

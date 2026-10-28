@@ -15,8 +15,9 @@ tailscale serve --bg --http=9002 http://localhost:9000
 tailscale serve --bg --http=9002 --set-path=/material http://localhost:9000/squire
 ```
 
-In LyrPlay: server = the server's Tailscale address, web port `9002`, SlimProto port `3483`.
+In LyrPlay: server = the server's MagicDNS name (for example `computer.taildaaaaa.ts.net`), web port `9002`, SlimProto port `3483`.
 
+- Use the MagicDNS name, not the `100.x` IP. `tailscale serve` matches routes by host name and answers requests to the bare IP with `404 page not found`.
 - Use `--http`: LyrPlay builds `http://` URLs.
 - LMS sees proxied requests as coming from localhost. Check this doesn't bypass LMS password or IP rules you rely on.
 - `tailscale serve reset` removes the routes.
@@ -83,6 +84,6 @@ Its remaining scripts target Material's DOM and globals (`TB_APP_SETTINGS`, `lms
 ## Checking on a phone
 
 1. Rooms shows the settings button, and it opens LyrPlay's settings.
-2. Selecting another room, then the phone's volume buttons, changes that room's volume.
+2. Hardware volume buttons: turn on LyrPlay's hardware volume buttons setting (off by default), stop playback on the phone, and select another room. The phone's side buttons then change that room's volume. LyrPlay leaves the buttons alone while the phone itself is playing or buffering, while the app is in the background, in Player Focus mode, and for players with fixed volume output.
 3. Toggling airplane mode while LyrPlay plays brings the UI back, with LyrPlay still selected.
-4. With Player Focus on, only LyrPlay's room is shown.
+4. Player Focus: turn on LyrPlay's iOS Player Focus setting (off by default). Rooms then shows only the phone's own room, and it stays selected.

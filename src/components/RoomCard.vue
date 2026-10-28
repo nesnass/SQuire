@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import usePlayerStore, { type Room } from '@/store/usePlayerStore'
 import { artworkUrl } from '@/lms/format'
 import Icon from './Icon.vue'
+import { actionSheet, showToast } from './overlays'
 import PlayingBars from './PlayingBars.vue'
 import RoomVolume from './RoomVolume.vue'
 
@@ -13,6 +14,23 @@ const { getters, actions } = usePlayerStore()
 const isActive = computed(() => props.room.members.some((m) => m.id === getters.activeId.value))
 const online = computed(() => props.room.members.some((m) => m.connected))
 const art = computed(() => artworkUrl(props.room.track, 160))
+
+function openMenu() {
+  const solo = props.room.members.length === 1
+  actionSheet.value = {
+    title: props.room.label,
+    subtitle: 'Disabled rooms are hidden and never played to',
+    actions: props.room.members.map((m) => ({
+      label: solo ? 'Disable room' : `Disable ${m.name}`,
+      icon: 'block',
+      run: () =>
+        void actions
+          .setDisabled(m.id, true)
+          .then(() => showToast(`${m.name} disabled`))
+          .catch(() => showToast("Couldn't reach the server")),
+    })),
+  }
+}
 </script>
 
 <template>
@@ -35,6 +53,14 @@ const art = computed(() => artworkUrl(props.room.track, 160))
           @click="emit('group', props.room.id)"
         >
           <Icon name="link" class="size-6" />
+        </button>
+        <button
+          type="button"
+          class="grid size-11 place-items-center rounded-full text-neutral-300 active:bg-neutral-700"
+          :aria-label="`More options for ${props.room.label}`"
+          @click="openMenu"
+        >
+          <Icon name="more" class="size-6" />
         </button>
       </span>
     </header>
