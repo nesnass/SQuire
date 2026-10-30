@@ -15,6 +15,8 @@ const loadError = ref(false)
 const creating = ref(false)
 const newName = ref('')
 const busy = ref(false)
+// The tapped playlist, highlighted while the add runs since the rows are easy to mis-tap
+const chosenId = ref<number | null>(null)
 const nameInput = ref<HTMLInputElement | null>(null)
 
 onMounted(async () => {
@@ -45,6 +47,7 @@ async function findOrCreate(name: string): Promise<Destination> {
 async function save(target: Destination | { name: string }, close: () => void) {
   if (busy.value) return
   busy.value = true
+  chosenId.value = 'id' in target ? target.id : null
   try {
     // Songs are resolved first so a failure can't leave an empty new playlist behind
     const urls = await props.content.urls()
@@ -61,6 +64,7 @@ async function save(target: Destination | { name: string }, close: () => void) {
     showToast("Couldn't update the playlist")
   } finally {
     busy.value = false
+    chosenId.value = null
   }
 }
 </script>
@@ -116,13 +120,19 @@ async function save(target: Destination | { name: string }, close: () => void) {
             <button
               type="button"
               class="flex min-h-14 w-full items-center gap-4 px-5 text-left active:bg-neutral-800 disabled:opacity-40"
-              :disabled="busy"
+              :class="{ 'bg-neutral-800 font-semibold text-accent': chosenId === p.id }"
+              :disabled="busy && chosenId !== p.id"
+              :aria-current="chosenId === p.id || undefined"
               @click="save({ id: p.id, name: p.playlist }, close)"
             >
-              <span class="flex size-10 items-center justify-center rounded-lg bg-neutral-800 text-neutral-500">
-                <Icon name="queue" class="size-6" />
+              <span
+                class="flex size-10 shrink-0 items-center justify-center rounded-lg"
+                :class="chosenId === p.id ? 'bg-accent text-neutral-950' : 'bg-neutral-800 text-neutral-500'"
+              >
+                <Icon :name="chosenId === p.id ? 'check' : 'queue'" class="size-6" />
               </span>
-              <span class="truncate">{{ p.playlist }}</span>
+              <span class="min-w-0 flex-1 truncate">{{ p.playlist }}</span>
+              <span v-if="chosenId === p.id" class="shrink-0 text-sm font-normal text-neutral-400">Adding…</span>
             </button>
           </li>
         </ul>

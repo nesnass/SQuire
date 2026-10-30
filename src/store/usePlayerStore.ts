@@ -397,11 +397,19 @@ function usePlayerStore() {
     async applyOutputs(roomId: string, selected: string[]) {
       const current = memberIds(roomId)
       if (!selected.length || !current.length) return
-      const anchor = current.find((id) => selected.includes(id)) ?? current[0]
-      for (const id of selected.filter((id) => !current.includes(id))) {
+      // `<anchor> sync <id>` makes id adopt the anchor's playlist, so a playing room wins over a silent one
+      const playing = rooms.value.filter((r) => r.isPlaying).flatMap((r) => r.members.map((m) => m.id))
+      const anchor =
+        selected.find((id) => current.includes(id) && playing.includes(id)) ??
+        selected.find((id) => playing.includes(id)) ??
+        current.find((id) => selected.includes(id)) ??
+        current[0]
+      const anchorRoom = rooms.value.find((r) => r.members.some((m) => m.id === anchor))
+      const anchorGroup = anchorRoom?.members.map((m) => m.id) ?? [anchor]
+      for (const id of selected.filter((id) => !anchorGroup.includes(id))) {
         await send(anchor, ['sync', id], false)
       }
-      for (const id of current.filter((id) => !selected.includes(id))) {
+      for (const id of new Set([...current, ...anchorGroup].filter((id) => !selected.includes(id)))) {
         await send(id, ['sync', '-'], false)
       }
       if (activeId.value && current.includes(activeId.value) && !selected.includes(activeId.value)) {
