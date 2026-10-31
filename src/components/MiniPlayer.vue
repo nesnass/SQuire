@@ -4,6 +4,7 @@ import usePlayerStore from '@/store/usePlayerStore'
 import { artworkUrl } from '@/lms/format'
 import Icon from './Icon.vue'
 import SkipIcon from './SkipIcon.vue'
+import Spinner from './Spinner.vue'
 import { useTransport } from './useTransport'
 
 const emit = defineEmits<{ open: [] }>()
@@ -40,7 +41,8 @@ function onTouchEnd(event: TouchEvent) {
           <span class="sr-only">Open now playing: </span>
           <span class="block truncate text-sm font-semibold">{{ getters.activeLabel.value }}</span>
           <span class="block truncate text-sm text-neutral-400">
-            {{ track ? [track.title, track.artist].filter(Boolean).join(' · ') : 'Nothing queued' }}
+            <template v-if="getters.starting.value">Starting…</template>
+            <template v-else>{{ track ? [track.title, track.artist].filter(Boolean).join(' · ') : 'Nothing queued' }}</template>
           </span>
         </span>
       </button>
@@ -50,7 +52,8 @@ function onTouchEnd(event: TouchEvent) {
         :aria-label="getters.isPlaying.value ? 'Pause' : 'Play'"
         @click="actions.togglePlay()"
       >
-        <Icon :name="getters.isPlaying.value ? 'pause' : 'play'" class="size-7" />
+        <Spinner v-if="getters.starting.value" class="size-7" />
+        <Icon v-else :name="getters.isPlaying.value ? 'pause' : 'play'" class="size-7" />
       </button>
       <button
         v-if="mode === 'podcast'"

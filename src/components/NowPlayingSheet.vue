@@ -6,6 +6,7 @@ import BottomSheet from './BottomSheet.vue'
 import Icon from './Icon.vue'
 import RoomVolume from './RoomVolume.vue'
 import SkipIcon from './SkipIcon.vue'
+import Spinner from './Spinner.vue'
 import { addToPlaylistAction, usePlayActions } from './browse/playActions'
 import { useTransport } from './useTransport'
 import { actionSheet, type SheetAction } from './overlays'
@@ -171,7 +172,8 @@ function onTouchEnd(event: TouchEvent) {
           :aria-label="getters.isPlaying.value ? 'Pause' : 'Play'"
           @click="actions.togglePlay()"
         >
-          <Icon :name="getters.isPlaying.value ? 'pause' : 'play'" class="size-10" />
+          <Spinner v-if="getters.starting.value" class="size-10" />
+        <Icon v-else :name="getters.isPlaying.value ? 'pause' : 'play'" class="size-10" />
         </button>
         <button
           v-if="mode === 'podcast'"

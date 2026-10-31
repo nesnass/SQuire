@@ -5,6 +5,10 @@ import type { LmsCommand, Player, PlayersResponse, PlayTarget, StatusResponse, S
 
 const TRACK_TAGS = 'tags:acdlKorITuxN'
 const POLL_MS = 2000
+// A poll stuck on a connection iOS dropped while suspended is abandoned so the next one can go through
+const REFRESH_TIMEOUT_MS = 4000
+// LMS answers nothing while it waits on a disk, so a few slow polls in a row mean busy rather than gone
+const TIMEOUTS_BEFORE_UNREACHABLE = 3
 const QUEUE_PAGE = 200
 const PLAYER_KEY = 'squire.playerId'
 // Kept on the server as a player pref so a disabled player stays disabled on every device
@@ -66,12 +70,18 @@ function usePlayerStore() {
   // Players hidden from rooms and never targeted, to avoid playing on the wrong device
   const disabledIds = ref<string[]>([])
   const now = ref(performance.now())
+  // Commands that change what's playing and haven't been answered; LMS can take seconds to open a file
+  const starting = ref(0)
 
   let queueKey = ''
   let disabledKey = ''
   let disabledAt = 0
   // Polls that started before the latest command are discarded so they can't undo optimistic updates
   let lastMutation = 0
+  // Only the latest refresh may apply its results; starting one cancels the one before
+  let inflight: AbortController | null = null
+  let commandsInFlight = 0
+  let timeouts = 0
   let started = false
 
   const focusId = computed(() => players.value.find((p) => p.name === focusName.value)?.playerid ?? null)
@@ -150,6 +160,7 @@ function usePlayerStore() {
     queue: computed(() => queue.value),
     error: computed(() => error.value),
     reachable: computed(() => reachable.value),
+    starting: computed(() => starting.value > 0),
     anyPlaying: computed(() => rooms.value.some((r) => r.isPlaying)),
     isPlaying: computed(() => activeRoom.value?.isPlaying ?? false),
     currentIndex: computed(() => Number(activeRoom.value?.status?.playlist_cur_index ?? -1)),
@@ -190,52 +201,67 @@ function usePlayerStore() {
     return activeId.value
   }
 
-  async function refreshQueue() {
+  async function refreshQueue(signal?: AbortSignal) {
     const id = activeId.value
     const status = activeRoom.value?.status
     if (!id || !status) return
     const key = `${id}:${status.playlist_timestamp}`
     if (key === queueKey) return
     queueKey = key
-    const res = await lmsQuery<StatusResponse>(id, ['status', 0, QUEUE_PAGE, TRACK_TAGS])
-    if (id === activeId.value) queue.value = res.playlist_loop ?? []
+    try {
+      const res = await lmsQuery<StatusResponse>(id, ['status', 0, QUEUE_PAGE, TRACK_TAGS], signal)
+      if (id === activeId.value) queue.value = res.playlist_loop ?? []
+    } catch (e) {
+      // Let the next poll retry instead of treating this playlist as loaded
+      if (queueKey === key) queueKey = ''
+      throw e
+    }
   }
 
   // Player prefs need a query each, so they're read less often than status; null when skipped
-  async function fetchDisabled(ids: string[]): Promise<string[] | null> {
+  async function fetchDisabled(ids: string[], signal: AbortSignal): Promise<string[] | null> {
     const key = ids.join(',')
     if (key === disabledKey && performance.now() - disabledAt < DISABLED_POLL_MS) return null
     const flags = await Promise.all(
       ids.map((id) =>
-        lmsQuery<{ _p2: string | null }>(id, ['playerpref', DISABLED_PREF, '?'])
+        lmsQuery<{ _p2: string | null }>(id, ['playerpref', DISABLED_PREF, '?'], signal)
           .then((r) => r._p2 === '1')
           .catch(() => isDisabled(id)),
       ),
     )
+    signal.throwIfAborted()
     disabledKey = key
     disabledAt = performance.now()
     return ids.filter((_, i) => flags[i])
   }
 
   async function refresh() {
+    inflight?.abort()
+    const controller = new AbortController()
+    inflight = controller
+    const { signal } = controller
+    const timer = setTimeout(() => controller.abort(new Error('LMS did not respond')), REFRESH_TIMEOUT_MS)
     const startedAt = performance.now()
     try {
       const [pl, sg] = await Promise.all([
-        lmsQuery<PlayersResponse>('', ['players', 0, 100]),
-        lmsQuery<SyncGroupsResponse>('', ['syncgroups', '?']),
+        lmsQuery<PlayersResponse>('', ['players', 0, 100], signal),
+        lmsQuery<SyncGroupsResponse>('', ['syncgroups', '?'], signal),
       ])
       reachable.value = true
+      timeouts = 0
       const connected = (pl.players_loop ?? []).filter((p) => p.connected)
       const [results, disabled] = await Promise.all([
         Promise.all(
           connected.map((p) =>
-            lmsQuery<StatusResponse>(p.playerid, ['status', '-', 1, TRACK_TAGS])
+            lmsQuery<StatusResponse>(p.playerid, ['status', '-', 1, TRACK_TAGS], signal)
               .then((status) => [p.playerid, status] as const)
               .catch(() => null),
           ),
         ),
-        fetchDisabled((pl.players_loop ?? []).map((p) => p.playerid)),
+        fetchDisabled((pl.players_loop ?? []).map((p) => p.playerid), signal),
       ])
+      // Per-player failures are tolerated above, but an abort must not blank every room
+      signal.throwIfAborted()
       if (lastMutation > startedAt) return
 
       players.value = pl.players_loop ?? []
@@ -255,18 +281,66 @@ function usePlayerStore() {
         const usable = connected.filter((p) => !isDisabled(p.playerid))
         actions.selectPlayer(usable.find((p) => p.isplaying)?.playerid ?? usable[0]?.playerid ?? null)
       }
-      await refreshQueue()
+      await refreshQueue(signal)
     } catch (e) {
+      // A newer refresh superseded this one; its outcome is what counts
+      if (inflight !== controller) return
+      if (signal.aborted && ++timeouts < TIMEOUTS_BEFORE_UNREACHABLE) return
       reachable.value = false
       error.value = e instanceof Error ? e.message : String(e)
+    } finally {
+      clearTimeout(timer)
+      if (inflight === controller) inflight = null
     }
+  }
+
+  // Background polls wait their turn, and skip while a command is out since LMS would only queue them
+  // behind it; refresh() itself always starts over, for resume and after commands
+  function poll() {
+    if (!inflight && !commandsInFlight) void refresh()
   }
 
   async function send(playerId: string | null, command: LmsCommand, refreshAfter = true) {
     if (!playerId) return
     lastMutation = performance.now()
-    await lmsCommand(playerId, command)
+    commandsInFlight++
+    try {
+      await lmsCommand(playerId, command)
+    } finally {
+      commandsInFlight--
+    }
     if (refreshAfter) await refresh()
+  }
+
+  // Covers the follow-up refresh too, so the old track isn't shown as current once the command returns
+  async function whileStarting<T>(run: () => Promise<T>): Promise<T> {
+    starting.value++
+    try {
+      return await run()
+    } finally {
+      starting.value--
+    }
+  }
+
+  type PlayMode = 'load' | 'insert' | 'add'
+
+  async function playItemsNow(cmd: PlayMode, target: PlayTarget, opts: { playIndex?: number; shuffle?: boolean }) {
+    const id = commandTarget()
+    if (!id) return false
+    if (opts.shuffle !== undefined) {
+      patch(memberIds(), { 'playlist shuffle': opts.shuffle ? 1 : 0 })
+      await send(id, ['playlist', 'shuffle', opts.shuffle ? 1 : 0], false)
+    }
+    if (cmd === 'load') patch(memberIds(), { mode: 'play' })
+    // Plugin menu items can be streams or feeds rather than library tracks, so their plugin plays them
+    if ('menu' in target) {
+      await send(id, [target.menu, 'playlist', cmd === 'load' ? 'play' : cmd, `item_id:${target.item_id}`])
+      return true
+    }
+    const params = Object.entries(target).map(([k, v]) => `${k}:${v}`)
+    if (opts.playIndex !== undefined) params.push(`play_index:${opts.playIndex}`)
+    await send(id, ['playlistcontrol', `cmd:${cmd}`, ...params])
+    return true
   }
 
   const actions = {
@@ -279,12 +353,14 @@ function usePlayerStore() {
       started = true
       void refresh()
       setInterval(() => {
-        if (document.visibilityState === 'visible') void refresh()
+        if (document.visibilityState === 'visible') poll()
       }, POLL_MS)
       setInterval(() => (now.value = performance.now()), 250)
+      // A poll frozen mid-flight by iOS would otherwise land late with the track from before suspension
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') void refresh()
       })
+      window.addEventListener('online', () => void refresh())
     },
     selectPlayer(id: string | null) {
       activeId.value = id
@@ -304,9 +380,9 @@ function usePlayerStore() {
       patch(memberIds(room.id), { mode: playing ? 'pause' : 'play' })
       return send(room.members[0].id, playing ? ['pause', 1] : ['play'])
     },
-    next: () => send(commandTarget(), ['playlist', 'index', '+1']),
-    previous: () => send(commandTarget(), ['playlist', 'index', '-1']),
-    playIndex: (index: number) => send(commandTarget(), ['playlist', 'index', index]),
+    next: () => whileStarting(() => send(commandTarget(), ['playlist', 'index', '+1'])),
+    previous: () => whileStarting(() => send(commandTarget(), ['playlist', 'index', '-1'])),
+    playIndex: (index: number) => whileStarting(() => send(commandTarget(), ['playlist', 'index', index])),
     seek(seconds: number) {
       patch(memberIds(), { time: seconds })
       return send(commandTarget(), ['time', Math.round(seconds)])
@@ -370,27 +446,13 @@ function usePlayerStore() {
       await refresh()
     },
     // load replaces the queue, insert plays next, add appends. Returns false when no room is selected
-    async playItems(
-      cmd: 'load' | 'insert' | 'add',
+    playItems(
+      cmd: PlayMode,
       target: PlayTarget,
       opts: { playIndex?: number; shuffle?: boolean } = {},
     ): Promise<boolean> {
-      const id = commandTarget()
-      if (!id) return false
-      if (opts.shuffle !== undefined) {
-        patch(memberIds(), { 'playlist shuffle': opts.shuffle ? 1 : 0 })
-        await send(id, ['playlist', 'shuffle', opts.shuffle ? 1 : 0], false)
-      }
-      if (cmd === 'load') patch(memberIds(), { mode: 'play' })
-      // Plugin menu items can be streams or feeds rather than library tracks, so their plugin plays them
-      if ('menu' in target) {
-        await send(id, [target.menu, 'playlist', cmd === 'load' ? 'play' : cmd, `item_id:${target.item_id}`])
-        return true
-      }
-      const params = Object.entries(target).map(([k, v]) => `${k}:${v}`)
-      if (opts.playIndex !== undefined) params.push(`play_index:${opts.playIndex}`)
-      await send(id, ['playlistcontrol', `cmd:${cmd}`, ...params])
-      return true
+      // Only load starts something new; queueing returns as soon as LMS has the list
+      return cmd === 'load' ? whileStarting(() => playItemsNow(cmd, target, opts)) : playItemsNow(cmd, target, opts)
     },
     // Makes `selected` the set of players in `roomId`'s group. Players are added before others leave,
     // so moving playback to an entirely different set of rooms keeps the playlist

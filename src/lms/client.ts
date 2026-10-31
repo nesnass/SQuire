@@ -4,9 +4,10 @@ interface RpcResponse<T> {
   result?: T
 }
 
-async function post<T>(playerId: string, command: LmsCommand): Promise<RpcResponse<T>> {
+async function post<T>(playerId: string, command: LmsCommand, signal?: AbortSignal): Promise<RpcResponse<T>> {
   const res = await fetch('/jsonrpc.js', {
     method: 'POST',
+    signal,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id: 1, method: 'slim.request', params: [playerId, command] }),
   })
@@ -14,8 +15,8 @@ async function post<T>(playerId: string, command: LmsCommand): Promise<RpcRespon
   return res.json() as Promise<RpcResponse<T>>
 }
 
-export async function lmsQuery<T>(playerId: string, command: LmsCommand): Promise<T> {
-  const body = await post<T>(playerId, command)
+export async function lmsQuery<T>(playerId: string, command: LmsCommand, signal?: AbortSignal): Promise<T> {
+  const body = await post<T>(playerId, command, signal)
   if (body.result === undefined) throw new Error(`LMS returned no result for ${command.join(' ')}`)
   return body.result
 }
