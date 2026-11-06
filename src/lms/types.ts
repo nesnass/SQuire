@@ -44,6 +44,8 @@ export type PlayMode = 'play' | 'pause' | 'stop'
 
 export interface StatusResponse {
   mode: PlayMode
+  // Set while LMS is in play mode but the player hasn't started; commands like pause are ignored then
+  waitingToPlay?: number
   player_name?: string
   power?: number
   time?: number

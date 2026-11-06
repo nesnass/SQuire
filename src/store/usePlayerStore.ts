@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { createStore } from './dev-store'
 import { lmsCommand, lmsQuery } from '@/lms/client'
+import { isStalled, isWaiting, waitingSince, type WaitTimes } from '@/lms/playback'
 import type { LmsCommand, Player, PlayersResponse, PlayTarget, StatusResponse, SyncGroupsResponse, Track } from '@/lms/types'
 
 const TRACK_TAGS = 'tags:acdlKorITuxN'
@@ -30,6 +31,10 @@ export interface Room {
   status?: StatusResponse
   track?: Track
   isPlaying: boolean
+  // Briefly between play and sound, as at the start of any track
+  isWaiting: boolean
+  // LMS says play but the player never started; only a jump gets it going again
+  isStalled: boolean
   volume: number
 }
 
@@ -39,9 +44,8 @@ export interface DisabledPlayer {
   isPlaying: boolean
 }
 
-interface Snapshot {
+interface Snapshot extends WaitTimes {
   status: StatusResponse
-  fetchedAt: number
 }
 
 function readSavedPlayer(): string | null {
@@ -115,14 +119,18 @@ function usePlayerStore() {
           connected: Boolean(player?.connected),
         }
       })
-      const status = ids.map((id) => snapshots.value[id]?.status).find(Boolean)
+      const snap = ids.map((id) => snapshots.value[id]).find(Boolean)
+      const status = snap?.status
+      const stalled = Boolean(snap && isStalled(snap.status, snap))
       return {
         id: ids[0],
         members,
         label: roomLabel(members.map((m) => m.name)),
         status,
         track: status?.playlist_loop?.[0],
-        isPlaying: status?.mode === 'play',
+        isPlaying: status?.mode === 'play' && !stalled,
+        isWaiting: Boolean(status && isWaiting(status)) && !stalled,
+        isStalled: stalled,
         volume: Math.max(0, ...members.map((m) => m.volume)),
       }
     })
@@ -160,7 +168,8 @@ function usePlayerStore() {
     queue: computed(() => queue.value),
     error: computed(() => error.value),
     reachable: computed(() => reachable.value),
-    starting: computed(() => starting.value > 0),
+    // Also true when something else started the room, since LMS reports the wait either way
+    starting: computed(() => starting.value > 0 || Boolean(activeRoom.value?.isWaiting)),
     anyPlaying: computed(() => rooms.value.some((r) => r.isPlaying)),
     isPlaying: computed(() => activeRoom.value?.isPlaying ?? false),
     currentIndex: computed(() => Number(activeRoom.value?.status?.playlist_cur_index ?? -1)),
@@ -178,7 +187,7 @@ function usePlayerStore() {
       const snap = id ? snapshots.value[id] : undefined
       if (!snap) return 0
       const s = snap.status
-      const elapsed = s.mode === 'play' ? (now.value - snap.fetchedAt) / 1000 : 0
+      const elapsed = s.mode === 'play' && !isWaiting(s) ? (now.value - snap.fetchedAt) / 1000 : 0
       const pos = (s.time ?? 0) + elapsed
       return s.duration ? Math.min(pos, s.duration) : pos
     }),
@@ -188,8 +197,19 @@ function usePlayerStore() {
     lastMutation = performance.now()
     for (const id of ids) {
       const snap = snapshots.value[id]
-      if (snap) snap.status = { ...snap.status, ...update }
+      if (!snap) continue
+      snap.status = { ...snap.status, ...update }
+      // A new mode starts the wait over, so a stalled room doesn't stay stalled once it's told to play
+      if (update.mode) {
+        snap.status.waitingToPlay = undefined
+        snap.waitingSince = null
+      }
     }
+  }
+
+  // LMS ignores `play` while it believes it's playing, but a jump restarts the stream from any state
+  function playCommand(room: Room): LmsCommand {
+    return room.isStalled ? ['playlist', 'index', Number(room.status?.playlist_cur_index ?? 0)] : ['play']
   }
 
   function memberIds(roomId?: string): string[] {
@@ -269,7 +289,11 @@ function usePlayerStore() {
       syncGroups.value = (sg.syncgroups_loop ?? []).map((g) => g.sync_members.split(','))
       const fetchedAt = performance.now()
       const next: Record<string, Snapshot> = {}
-      for (const r of results) if (r) next[r[0]] = { status: r[1], fetchedAt }
+      for (const r of results) {
+        if (!r) continue
+        const [id, status] = r
+        next[id] = { status, fetchedAt, waitingSince: waitingSince(status, snapshots.value[id]?.waitingSince ?? null, fetchedAt) }
+      }
       snapshots.value = next
       error.value = null
 
@@ -377,8 +401,8 @@ function usePlayerStore() {
       const room = roomId ? rooms.value.find((r) => r.id === roomId) : activeRoom.value
       if (!room) return
       const playing = room.isPlaying
-      patch(memberIds(room.id), { mode: playing ? 'pause' : 'play' })
-      return send(room.members[0].id, playing ? ['pause', 1] : ['play'])
+      patch(memberIds(room.id), playing ? { mode: 'pause' } : room.isStalled ? { mode: 'play', time: 0 } : { mode: 'play' })
+      return send(room.members[0].id, playing ? ['pause', 1] : playCommand(room))
     },
     next: () => whileStarting(() => send(commandTarget(), ['playlist', 'index', '+1'])),
     previous: () => whileStarting(() => send(commandTarget(), ['playlist', 'index', '-1'])),
@@ -442,7 +466,7 @@ function usePlayerStore() {
     async playAll() {
       const ready = rooms.value.filter((r) => r.members[0].connected && (r.status?.playlist_tracks ?? 0) > 0)
       for (const r of ready) patch(memberIds(r.id), { mode: 'play' })
-      await Promise.all(ready.map((r) => send(r.members[0].id, ['play'], false)))
+      await Promise.all(ready.map((r) => send(r.members[0].id, playCommand(r), false)))
       await refresh()
     },
     // load replaces the queue, insert plays next, add appends. Returns false when no room is selected
