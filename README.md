@@ -16,4 +16,6 @@ The dev server proxies `/jsonrpc.js`, `/music`, `/imageproxy`, `/plugins` and `/
 
 `pnpm build` writes the skin to `plugin/Squire/HTML/squire`. Copy `plugin/Squire` into the LMS `Plugins` directory, restart LMS, and open `http://<host>:9000/squire/`.
 
+LMS caches `index.html` for up to an hour and a build deletes the assets it names, so restart LMS after `pnpm build` or the skin won't load. `pnpm build:dev` keeps earlier assets, so the cached page still loads until LMS picks up the new one.
+
 To use Squire inside the LyrPlay iOS app, see [docs/lyrplay-bridge.md](docs/lyrplay-bridge.md).
