@@ -14,8 +14,7 @@ The foundation is right and the direction is holding: Squire does look and feel 
 phone, and the Rooms model is the clearest part of it. The work ahead is mostly three things:
 
 1. A handful of interaction defects in the parts already built (seek, queue, contrast, back navigation).
-2. Gaps that break the "don't drop what people rely on" rule — there is no route to anything outside
-   albums/artists/playlists/podcasts/radio.
+2. Gaps in the local collection: no genres, years or random mix.
 3. Home and Rooms need a second pass now that real content is in them.
 
 Nothing here calls for a rewrite or a new dependency.
@@ -69,14 +68,13 @@ Missing, in order of how likely each is to send someone back to Material:
 | Gap | Cost | Plan |
 |---|---|---|
 | Queue editing: remove, reorder, clear | Low — `EditableTrackList` already does this for playlists | P1.2 |
-| Apps (streaming services and other plugin menus) | Low — `MenuView` already renders any plugin menu; `apps` lists them like `radios` | P2.1 |
-| Genres, years, folders, random mix | Low–medium | P2.1 |
+| Genres, years, random mix | Low–medium | P2.1 |
 | Go to album / artist from now playing | Low | P1.3 |
 | Sleep timer, power, per-player settings | Low for sleep/power; settings are large | P2.2 (sleep and power only) |
-| A way out to Material for everything else | Trivial | P2.1 |
 
-Not planned: server settings, player settings beyond sleep/power, library rescans, lyrics, a light theme.
-The escape hatch covers them until someone misses one.
+Not planned: folders, plugin apps, a link to Material, server settings, player settings beyond sleep/power,
+library rescans, lyrics, a light theme. Squire covers what this household uses; add any of these when it's
+missed.
 
 ## UX and UI
 
@@ -108,7 +106,7 @@ The escape hatch covers them until someone misses one.
 5. **Selecting a room is a hidden target** (`RoomCard.vue`). Only the art-and-title strip selects; the card
    has four other targets around it. Tapping anywhere that isn't a control should select.
 6. **"Pods"** in the Library switcher. Five segments is the limit of that control and the abbreviation
-   shows it; adding Genres or Apps would break it outright.
+   shows it; adding Genres or Years would break it outright.
 
 ### Design changes
 
@@ -143,7 +141,7 @@ The escape hatch covers them until someone misses one.
 
 | # | Change | Files |
 |---|---|---|
-| 2.1 | Library "More": Genres, Years, Folders, Random mix, Apps, and "Open classic skin". Replace the segmented control with a scrolling row so labels are whole | `BrowseView.vue`, `library.ts`, `nav.ts`, new views |
+| 2.1 | Library regrouped: Music · Playlists · Podcasts · Radio; Music gains genre and year filters and random mix | `BrowseView.vue`, new `MusicView.vue`, `library.ts` |
 | 2.2 | Room menu: sleep timer and power, next to Disable | `RoomCard.vue`, `usePlayerStore.ts` |
 | 2.3 | Home: favourites grid with cap, drop or cap playlists | `HomeView.vue` |
 | 2.4 | Landing tab: remember last; Home under Player Focus | `App.vue` |
@@ -160,11 +158,12 @@ The escape hatch covers them until someone misses one.
 | 3.3 | `oxlint` plus a GitHub Action running `typecheck` and `test`; move `@vue/devtools-api` to `devDependencies` |
 | 3.4 | Show `window.lyrplayStreamText` in now playing when LyrPlay is the active player |
 | 3.5 | If Squire is to be shared: plugin icon, `repo.xml`, a release build |
+| 3.6 | Cover view in now playing on tablet and desktop (spec below) |
 
 ### Suggested order
 
 1.1, 1.5 and 1.6 first: each is under an hour and all three are visible daily. Then 1.2 and 1.4, which are
-the two that most change how the app feels. Then 2.1, which is what stops a return trip to Material.
+the two that most change how the app feels. Then 2.1.
 
 ## Specs
 
@@ -261,37 +260,58 @@ Check on a phone before merging:
 Done when: browser back, Android back and the iOS edge swipe each close exactly one sheet or level; back
 never changes tab; the four LyrPlay checks in `docs/lyrplay-bridge.md` still pass.
 
-### 2.1 Library "More"
+### 2.1 Library regrouped
 
-Switcher: a horizontally scrolling row of the existing pill buttons with full labels —
-Albums, Artists, Playlists, Podcasts, Radio, More. Drop the `short` label mechanism.
+Group by what relates. Albums, artists, genres, years and random mix are all views of the local collection;
+podcasts and radio are separate worlds (nothing in them can go on a playlist); playlists are used often
+enough to stay top-level.
 
-More shows a plain list of rows (icon, label, chevron):
+Switcher: **Music · Playlists · Podcasts · Radio**. Four whole labels fit at 390 px; drop the `short`
+mechanism. On `lg:` (P3.1) these become four entries in the side rail.
 
-| Row | Opens | LMS |
-|---|---|---|
-| Genres | List of 134 genres → albums in that genre | `genres 0 N` ✓, `albums … genre_id:<id>` ✓ |
-| Years | Years newest first → albums of that year | `years 0 N` ✓, `albums … year:<y>` ✓ |
-| Folders | The two music folders → subfolders and tracks | `musicfolder 0 N tags:dcu [folder_id:<id>]` ✓ |
-| Random mix | Action sheet: Songs, Albums, Artists, Stop | `randomplay tracks\|albums\|contributors\|disable` ✗ (`can randomplay ?` ✓ = 1) |
-| Apps | One row per app except Podcasts, opening `MenuView` | `apps 0 100` ✓ — this server has only "Sounds & Effects" |
-| Open classic skin | Navigates to `/material/` | Hidden when `host.native`, or when the page is itself served from `/material/` |
+Music:
 
-Code:
+- A second, smaller control: **Albums · Artists**.
+- Below it a row of chips: **Sort** (albums only, the existing three sorts), **Genre**, **Year**, and a
+  **Shuffle** button at the end. Genre and Year are filters on the list, not separate screens: picking
+  Jazz shows Jazz albums (or artists); a set chip shows its value and an ×.
+- Genre opens a sheet listing all genres with the letter rail; Year opens a sheet of years grouped by
+  decade, newest first. Both: `genres 0 N` ✓, `years 0 N` ✓.
+- Albums filter with `genre_id:` ✓ and `year:` ✓; artists with `genre_id:` ✗. Both filters together ✗ —
+  confirm, else make them exclusive.
+- With a filter set, a Play/Shuffle bar plays what's listed: `playlistcontrol cmd:load genre_id:… | year:…`
+  ✗ — confirm before wiring.
+- Shuffle opens an action sheet: Random songs, Random albums, Random artists, and Stop when `status.randomplay`
+  ✓ is set. `randomplay tracks|albums|contributors|disable` ✗. Hidden when `can randomplay ?` is 0 ✓.
 
-- `library.ts`: `fetchGenres`, `fetchYears`, `fetchFolder(folderId?)`; `fetchAlbums` takes `genreId` and
-  `year`.
-- `types.ts`: `PlayTarget` gains `{ genre_id }`, `{ year }`, `{ folder_id }`. These go through the existing
-  `playlistcontrol` path unchanged ✗ — confirm each plays before wiring its Play button.
-- `nav.ts`: routes `genres`, `years`, `albumList { title, genreId?, year? }`, `folder { id?, name }`.
-- Views: `FacetListView` (one component for genres and years), `AlbumListView` (the Albums grid plus
-  `PlayBar`, taking a filter), `FolderView` (folder rows push; track rows play by `track_id`).
-- Random mix shows as active from `status.randomplay` ✓; the sheet then leads with Stop.
-- Hide Random mix when `can randomplay ?` is 0, and Apps when the list is empty after removing Podcasts.
+- Artists lists album artists: `role_id:ALBUMARTIST,ARTIST` ✓ (1324 of 1967). Today's unfiltered list also
+  holds 707 composers and 582 track-only artists (guests, compilation tracks), most of whom have no album
+  of their own. Those stay reachable through Search and an album's credits.
+- On Artists the chip row is **Genre** and **Role**. Role is Album artists (default), Composers or Guests.
+  Composers and Guests are only the people with no album-artist credit: on this server 548 composers and
+  90 guests, from the full list minus `role_id:ALBUMARTIST,ARTIST` ✓, and `role_id:COMPOSER` /
+  `role_id:TRACKARTIST` ✓ to tell them apart. LMS can't exclude a role in one query, so the ids are fetched
+  once per session (about 215 KB for all 1967) and the difference is taken in the client. Genre is hidden
+  under Composers and Guests. Drop the `<?>` entry.
+- A composer or guest opens a track list rather than an album grid: `titles artist_id:<id> tags:…` ✓,
+  grouped by album, each row playable and with the usual ⋯ sheet. Their albums are mostly someone else's
+  compilations, so a grid would show the wrong covers.
+- Composer names come from the tags as written. With LMS splitting on `;` (`splitList` ✓), credits
+  written as `Brian Holland/Eddie Holland/Lamont Dozier` arrive as one name. Squire shows them as they are;
+  splitting on `/` would break names like AC/DC, so fixing them is a tagging job.
+- An album artist's own page (`ArtistView`) splits into **Albums** (`albums artist_id:<id>
+  role_id:ALBUMARTIST,ARTIST` ✓) and **Appears on**: every album with any credit (`albums artist_id:<id>` ✓,
+  what the page lists today, mixed together) minus those. Each Appears on tile is labelled with the album's
+  own artist. Example: David Bowie has 11 albums and appears on Nirvana's *MTV Unplugged in New York* as a
+  composer. The section is hidden when empty.
 
-Done when: every row opens without error on this server; a genre and a year each list the right albums and
-their Play button plays them; Folders reaches a track three levels down and plays it; the switcher shows
-whole labels at 390 px.
+Code: `library.ts` gains `fetchGenres`, `fetchYears`, and `genreId`/`year` options on `fetchAlbums` and
+`fetchArtists`. The albums/artists half of `BrowseView` moves into `MusicView.vue`; `BrowseView` keeps the
+switcher, playlists, podcasts and radio. The selected section and filters are kept per session.
+
+Done when: the switcher shows whole labels at 390 px; Jazz lists the right albums and artists and its Play
+button plays them; a year works the same way; clearing a chip restores the full list at its scroll
+position; random mix starts, shows as active and stops.
 
 ### 2.2 Sleep and power
 
@@ -366,10 +386,27 @@ stays scrollable so loaded lists can still be read. All of it lifts on the next 
 Done when: with the server stopped, the state shows within 12 s (three timeouts), no control appears to
 work, and Retry or the next poll restores everything without a reload.
 
+### 3.6 Cover view
+
+On wide screens (`md:` and up) now playing gets a second state where the cover fills the screen.
+
+- Enter: tap the cover, or press `F`. The cover scales to the largest square that fits, over a blurred,
+  darkened copy of itself filling the rest; everything else fades out over 200 ms (`motion-reduce` instant).
+- Return: tap or click anywhere, or press `Esc` or `F`. Moving the mouse or touching the screen shows a
+  thin bar along the bottom (title, play/pause, a button back to the controls) that hides again after
+  3 s idle; no other control appears on the cover itself.
+- Art: request `cover_1600x1600_f` in this state only (the sheet uses 800 today), so full screen on an iPad
+  or a 1440 px window isn't blurry.
+- Track changes crossfade the cover. Radio and podcasts work the same with their artwork.
+- The state is kept while now playing stays open, not across sessions. Under 1.4 it is not a separate
+  history entry: back closes now playing as before.
+- Screen wake lock (`navigator.wakeLock`) while in cover view and playing, released on exit, so an iPad on
+  a stand doesn't sleep.
+
+Done when: on an iPad in both orientations and at 1440×900, one tap shows the cover full screen and one tap
+returns to the controls; play/pause works from the bottom bar without leaving the cover.
+
 ## Open questions
 
-- Is Squire for this household only, or meant to be published? That decides P3.5.
-- Does anyone use it on a desktop or tablet? If not, P3.1 can be dropped.
-
-Answered by the server: no streaming plugins are installed (`apps` lists only Sounds & Effects and
-Podcasts), so Apps stays a single row in More.
+None. Squire is used on phone, iPad and desktop, so P3.1 stays; it should be publishable eventually, so
+P3.5 stays.
