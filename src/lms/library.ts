@@ -102,6 +102,31 @@ export async function fetchAlbums(
   return { items: res.albums_loop ?? [], count: res.count, index: res.indexList }
 }
 
+// LMS filters albums by one year only, so a decade is its years fetched whole and merged
+const DECADE_YEAR_MAX = 2000
+
+export async function fetchDecadeAlbums(
+  decade: number,
+  opts: { sort: AlbumSort; genreId?: number },
+): Promise<Page<Album>> {
+  const years = (await fetchYears()).filter((y) => y >= decade && y < decade + 10)
+  const pages = await Promise.all(
+    years.map((year) => fetchAlbums(0, DECADE_YEAR_MAX, { sort: opts.sort, genreId: opts.genreId, year })),
+  )
+  const items = sortAlbums(pages.flatMap((p) => p.items), opts.sort)
+  return { items, count: items.length }
+}
+
+// "Recently added" has no timestamp to merge on, so the newest years come first instead
+export function sortAlbums(albums: Album[], sort: AlbumSort): Album[] {
+  const by = (a: string | undefined, b: string | undefined) => (a ?? '').localeCompare(b ?? '', undefined, { sensitivity: 'base' })
+  return [...albums].sort((a, b) => {
+    if (sort === 'album') return by(a.album, b.album)
+    if (sort === 'artistalbum') return by(a.artist, b.artist) || by(a.album, b.album)
+    return (b.year ?? 0) - (a.year ?? 0)
+  })
+}
+
 export async function fetchTracks(
   start: number,
   n: number,

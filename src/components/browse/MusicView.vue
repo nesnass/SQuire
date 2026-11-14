@@ -6,6 +6,7 @@ import {
   fetchAlbumArtistRole,
   fetchAlbums,
   fetchAllArtists,
+  fetchDecadeAlbums,
   fetchArtists,
   type AlbumSort,
 } from '@/lms/library'
@@ -22,7 +23,7 @@ import LoadMore from './LoadMore.vue'
 import PlayBar from './PlayBar.vue'
 import { usePlayActions } from './playActions'
 import { usePaged } from './usePaged'
-import YearSheet from './YearSheet.vue'
+import YearSheet, { type Period } from './YearSheet.vue'
 
 type Kind = 'albums' | 'artists'
 type Role = 'main' | CreditRole
@@ -49,7 +50,9 @@ const { openActions } = usePlayActions()
 const kind = ref<Kind>('albums')
 const sort = ref<AlbumSort>('new')
 const genre = ref<Genre | null>(null)
-const year = ref<number | null>(null)
+const period = ref<Period | null>(null)
+const year = computed(() => (period.value && !period.value.decade ? period.value.value : null))
+const periodLabel = computed(() => (period.value ? `${period.value.value}${period.value.decade ? 's' : ''}` : ''))
 const role = ref<Role>('main')
 const picking = ref<'genre' | 'year' | null>(null)
 const randomAvailable = ref(false)
@@ -57,7 +60,9 @@ const root = ref<HTMLElement | null>(null)
 
 // The letter index comes with the first page; "Recently added" has no alphabetical order to index
 const albums = usePaged((start, n) =>
-  fetchAlbums(start, n, {
+  period.value?.decade
+    ? fetchDecadeAlbums(period.value.value, { sort: sort.value, genreId: genre.value?.id })
+    : fetchAlbums(start, n, {
     sort: sort.value,
     withIndex: start === 0 && sort.value !== 'new',
     genreId: genre.value?.id,
@@ -92,12 +97,14 @@ async function loadCredits(r: CreditRole) {
   }
 }
 
-const filtered = computed(() => Boolean(genre.value || year.value))
+const filtered = computed(() => Boolean(genre.value || period.value))
+// LMS plays one year at a time, so a decade has no play-all
 const filterTarget = computed<PlayTarget | null>(() => {
+  if (period.value?.decade) return null
   if (genre.value) return { genre_id: genre.value.id, ...(year.value ? { year: year.value } : {}) }
   return year.value ? { year: year.value } : null
 })
-const filterTitle = computed(() => [genre.value?.genre, year.value].filter(Boolean).join(' · '))
+const filterTitle = computed(() => [genre.value?.genre, periodLabel.value].filter(Boolean).join(' · '))
 const sortLabel = computed(() => SORTS.find((s) => s.id === sort.value)?.label)
 const roleLabel = computed(() => ROLES.find((r) => r.id === role.value)?.label)
 const mixOn = computed(() => Boolean(getters.status.value?.randomplay))
@@ -116,7 +123,7 @@ watch(filtered, async (now, before) => {
   }
 })
 
-watch([sort, genre, year], albums.reset)
+watch([sort, genre, period], albums.reset)
 watch(genre, () => {
   if (artists.count.value !== null) artists.reset()
 })
@@ -231,11 +238,11 @@ const chipOff = 'border-neutral-700 text-neutral-300'
         </button>
       </template>
       <template v-if="kind === 'albums'">
-        <span v-if="year" :class="[chip, chipOn, 'pr-0']">
+        <span v-if="period" :class="[chip, chipOn, 'pr-0']">
           <button type="button" class="flex items-center gap-1 tabular-nums" @click="picking = 'year'">
-            <span class="sr-only">Year:</span>{{ year }}
+            <span class="sr-only">Year:</span>{{ periodLabel }}
           </button>
-          <button type="button" class="grid size-9 place-items-center" :aria-label="`Clear year ${year}`" @click="year = null">
+          <button type="button" class="grid size-9 place-items-center" :aria-label="`Clear year ${periodLabel}`" @click="period = null">
             <Icon name="close" class="size-4" />
           </button>
         </span>
@@ -246,8 +253,8 @@ const chipOff = 'border-neutral-700 text-neutral-300'
     </div>
 
     <template v-if="kind === 'albums'">
-      <template v-if="filterTarget">
-        <PlayBar :target="filterTarget" :more-label="`More for ${filterTitle}`" @more="filterMore" />
+      <template v-if="filtered">
+        <PlayBar v-if="filterTarget" :target="filterTarget" :more-label="`More for ${filterTitle}`" @more="filterMore" />
         <p v-if="albums.count.value !== null" class="px-4 pb-3 text-sm text-neutral-400">
           {{ albums.count.value }} {{ albums.count.value === 1 ? 'album' : 'albums' }}
         </p>
@@ -325,6 +332,6 @@ const chipOff = 'border-neutral-700 text-neutral-300'
     </template>
 
     <GenreSheet v-if="picking === 'genre'" :selected="genre?.id" @pick="genre = $event" @close="picking = null" />
-    <YearSheet v-if="picking === 'year'" :selected="year ?? undefined" @pick="year = $event" @close="picking = null" />
+    <YearSheet v-if="picking === 'year'" :selected="period" @pick="period = $event" @close="picking = null" />
   </div>
 </template>

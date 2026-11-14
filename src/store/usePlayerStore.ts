@@ -13,6 +13,10 @@ const RECENT_COMMAND_MS = 10_000
 const TICK_MS = 1000
 // A poll stuck on a connection iOS dropped while suspended is abandoned so the next one can go through
 const REFRESH_TIMEOUT_MS = 4000
+// After waking, sockets from before suspension are dead and the network (Tailscale) may take a moment, so retry
+// briskly with a short timeout instead of waiting out the normal one
+const RESUME_WINDOW_MS = 15_000
+const RESUME_TIMEOUT_MS = 1500
 // LMS answers nothing while it waits on a disk, so a few slow polls in a row mean busy rather than gone
 const TIMEOUTS_BEFORE_UNREACHABLE = 3
 const QUEUE_PAGE = 200
@@ -103,6 +107,7 @@ function usePlayerStore() {
   let inflight: AbortController | null = null
   let commandsInFlight = 0
   let timeouts = 0
+  let resumeUntil = 0
   let started = false
 
   const focusId = computed(() => players.value.find((p) => p.name === focusName.value)?.playerid ?? null)
@@ -290,7 +295,9 @@ function usePlayerStore() {
     const controller = new AbortController()
     inflight = controller
     const { signal } = controller
-    const timer = setTimeout(() => controller.abort(new Error('LMS did not respond')), REFRESH_TIMEOUT_MS)
+    const resuming = performance.now() < resumeUntil
+    const timeout = resuming ? RESUME_TIMEOUT_MS : REFRESH_TIMEOUT_MS
+    const timer = setTimeout(() => controller.abort(new Error('LMS did not respond')), timeout)
     const startedAt = performance.now()
     lastRefreshAt = startedAt
     try {
@@ -300,6 +307,7 @@ function usePlayerStore() {
       ])
       reachable.value = true
       timeouts = 0
+      resumeUntil = 0
       const connected = (pl.players_loop ?? []).filter((p) => p.connected)
       const [results, disabled] = await Promise.all([
         Promise.all(
@@ -340,7 +348,8 @@ function usePlayerStore() {
     } catch (e) {
       // A newer refresh superseded this one; its outcome is what counts
       if (inflight !== controller) return
-      if (signal.aborted && ++timeouts < TIMEOUTS_BEFORE_UNREACHABLE) return
+      // Waking up isn't being offline; only a failure after the resume window counts
+      if (resuming || (signal.aborted && ++timeouts < TIMEOUTS_BEFORE_UNREACHABLE)) return
       reachable.value = false
       error.value = e instanceof Error ? e.message : String(e)
     } finally {
@@ -432,6 +441,7 @@ function usePlayerStore() {
       setInterval(() => {
         if (document.visibilityState !== 'visible') return
         const t = performance.now()
+        if (t < resumeUntil) return poll()
         const busy =
           watching.value ||
           t - lastMutation < RECENT_COMMAND_MS ||
@@ -440,10 +450,18 @@ function usePlayerStore() {
       }, TICK_MS)
       setInterval(() => (now.value = performance.now()), 250)
       // A poll frozen mid-flight by iOS would otherwise land late with the track from before suspension
+      const resume = () => {
+        resumeUntil = performance.now() + RESUME_WINDOW_MS
+        void refresh()
+      }
       document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') void refresh()
+        if (document.visibilityState === 'visible') resume()
       })
-      window.addEventListener('online', () => void refresh())
+      // A page restored from the back-forward cache, which fires no visibilitychange
+      window.addEventListener('pageshow', (e) => {
+        if (e.persisted) resume()
+      })
+      window.addEventListener('online', resume)
     },
     selectPlayer(id: string | null) {
       activeId.value = id
