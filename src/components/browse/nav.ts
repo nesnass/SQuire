@@ -1,8 +1,11 @@
 import { inject, type InjectionKey } from 'vue'
+import type { CreditRole } from '@/lms/credits'
 import type { Album, MenuItem, Playlist } from '@/lms/types'
 
 export type Route =
   | { kind: 'artist'; id: number; name: string }
+  // A composer or guest: the tracks they're credited on
+  | { kind: 'credits'; id: number; name: string; role: CreditRole }
   | { kind: 'album'; album: Album }
   | { kind: 'playlist'; playlist: Playlist }
   | { kind: 'favorites'; id: string; name: string }

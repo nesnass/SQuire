@@ -6,9 +6,10 @@ import FavoriteRow from './FavoriteRow.vue'
 import LoadMore from './LoadMore.vue'
 import { usePaged } from './usePaged'
 
+// An empty id lists the top level, for Home's "Show all"
 const props = defineProps<{ id: string; name: string }>()
 const heading = ref<HTMLElement | null>(null)
-const items = usePaged((start, n) => fetchFavorites(start, n, props.id))
+const items = usePaged((start, n) => fetchFavorites(start, n, props.id || undefined))
 
 onMounted(() => {
   items.reset()
@@ -21,7 +22,7 @@ onMounted(() => {
     <BackHeader :title="props.name" />
     <h1 ref="heading" tabindex="-1" class="px-4 pt-2 pb-3 text-3xl font-bold outline-none">{{ props.name }}</h1>
     <ul>
-      <li v-for="f in items.items.value" :key="f.id"><FavoriteRow :favorite="f" nested /></li>
+      <li v-for="f in items.items.value" :key="f.id"><FavoriteRow :favorite="f" :nested="Boolean(props.id)" /></li>
     </ul>
     <LoadMore :loading="items.loading.value" :error="items.error.value" :done="items.done.value" @more="items.more" />
   </article>

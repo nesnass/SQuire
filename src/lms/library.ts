@@ -6,12 +6,15 @@ import type {
   ArtistsResponse,
   Favorite,
   FavoritesResponse,
+  Genre,
+  GenresResponse,
   LetterIndex,
   LibraryTrack,
   Playlist,
   PlaylistsResponse,
   PlaylistTracksResponse,
   TitlesResponse,
+  YearsResponse,
 } from './types'
 
 export interface Page<T> {
@@ -32,17 +35,35 @@ function filters(params: Record<string, string | number | undefined>): string[] 
     .map(([k, v]) => `${k}:${v}`)
 }
 
+// Contributor roles that can mean "this is their album": an album with no album-artist tag credits its performer
+// as ARTIST. Track artists on compilations are ARTIST too, so pair this with `compilation: 0` for albums.
+export const ALBUM_ARTIST_ROLES = 'ALBUMARTIST,ARTIST'
+
+let albumArtistRole: Promise<string> | null = null
+
+// Which role lists album artists. A tagged library has ALBUMARTIST, and ARTIST would add everyone on a
+// compilation; a library without album-artist tags only has ARTIST to go on.
+export function fetchAlbumArtistRole(): Promise<string> {
+  albumArtistRole ??= lmsQuery<ArtistsResponse>('', ['artists', 0, 1, 'role_id:ALBUMARTIST'])
+    .then((r) => (r.count > 0 ? 'ALBUMARTIST' : ALBUM_ARTIST_ROLES))
+    .catch((e: unknown) => {
+      albumArtistRole = null
+      throw e
+    })
+  return albumArtistRole
+}
+
 export async function fetchArtists(
   start: number,
   n: number,
-  opts: { search?: string; withIndex?: boolean } = {},
+  opts: { search?: string; withIndex?: boolean; genreId?: number; roleId?: string } = {},
 ): Promise<Page<Artist>> {
   const res = await lmsQuery<ArtistsResponse>('', [
     'artists',
     start,
     n,
     ...(opts.withIndex ? ['tags:Z'] : []),
-    ...filters({ search: opts.search }),
+    ...filters({ search: opts.search, genre_id: opts.genreId, role_id: opts.roleId }),
   ])
   return { items: res.artists_loop ?? [], count: res.count, index: res.indexList }
 }
@@ -56,6 +77,10 @@ export async function fetchAlbums(
     albumId?: number
     search?: string
     withIndex?: boolean
+    genreId?: number
+    year?: number
+    roleId?: string
+    compilation?: 0 | 1
   } = {},
 ): Promise<Page<Album>> {
   const res = await lmsQuery<AlbumsResponse>('', [
@@ -63,7 +88,16 @@ export async function fetchAlbums(
     start,
     n,
     opts.withIndex ? `${ALBUM_TAGS}Z` : ALBUM_TAGS,
-    ...filters({ sort: opts.sort, artist_id: opts.artistId, album_id: opts.albumId, search: opts.search }),
+    ...filters({
+      sort: opts.sort,
+      artist_id: opts.artistId,
+      album_id: opts.albumId,
+      search: opts.search,
+      genre_id: opts.genreId,
+      year: opts.year,
+      role_id: opts.roleId,
+      compilation: opts.compilation,
+    }),
   ])
   return { items: res.albums_loop ?? [], count: res.count, index: res.indexList }
 }
@@ -71,7 +105,7 @@ export async function fetchAlbums(
 export async function fetchTracks(
   start: number,
   n: number,
-  opts: { albumId?: number; artistId?: number; search?: string },
+  opts: { albumId?: number; artistId?: number; search?: string; sort?: 'albumtrack' },
 ): Promise<Page<LibraryTrack>> {
   const res = await lmsQuery<TitlesResponse>('', [
     'titles',
@@ -82,10 +116,32 @@ export async function fetchTracks(
       album_id: opts.albumId,
       artist_id: opts.artistId,
       search: opts.search,
-      sort: opts.albumId ? 'tracknum' : undefined,
+      sort: opts.albumId ? 'tracknum' : opts.sort,
     }),
   ])
   return { items: res.titles_loop ?? [], count: res.count }
+}
+
+// Small enough (a few hundred at most) to fetch whole and filter in the client
+export async function fetchGenres(): Promise<Genre[]> {
+  const res = await lmsQuery<GenresResponse>('', ['genres', 0, 1000])
+  return res.genres_loop ?? []
+}
+
+export async function fetchYears(): Promise<number[]> {
+  const res = await lmsQuery<YearsResponse>('', ['years', 0, 1000])
+  return (res.years_loop ?? []).map((y) => y.year).filter((y) => y > 0)
+}
+
+// Every artist with the given roles, in one request; used where the server can't filter for us
+export async function fetchAllArtists(roleId: string): Promise<Artist[]> {
+  const res = await lmsQuery<ArtistsResponse>('', ['artists', 0, 20000, `role_id:${roleId}`])
+  return res.artists_loop ?? []
+}
+
+export async function canRandomPlay(): Promise<boolean> {
+  const res = await lmsQuery<{ _can?: number }>('', ['can', 'randomplay', '?'])
+  return res._can === 1
 }
 
 export async function fetchPlaylists(start: number, n: number): Promise<Page<Playlist>> {

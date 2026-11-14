@@ -59,6 +59,9 @@ declare global {
     // LyrPlay's reconnect script (MaterialReconnect.swift) looks these up by Material's names
     lmsIsConnected?: boolean
     app?: LegacyApp
+    // Set by LyrPlay while it plays: what the phone is decoding, e.g. "FLAC, 44.1kHz, 16bit, 850kbps"
+    lyrplayStreamText?: string
+    lyrplayPlayerId?: string
   }
 }
 
@@ -68,6 +71,13 @@ export const host = parseHostParams(globalThis.location?.search ?? '')
 export function openHostSettings() {
   // The host cancels this navigation and opens its settings instead
   if (host.settings) window.location.href = host.settings.url
+}
+
+// LyrPlay's own description of its stream, when it is the player in question. Plain globals, so callers poll.
+export function hostStreamText(playerId: string | null): string | null {
+  const id = window.lyrplayPlayerId
+  if (!playerId || !id || id.toLowerCase() !== playerId.toLowerCase()) return null
+  return window.lyrplayStreamText || null
 }
 
 function post(message: string) {

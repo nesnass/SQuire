@@ -9,7 +9,7 @@ const podcasts = usePodcastStore()
 </script>
 
 <template>
-  <ul class="grid grid-cols-2 gap-x-4 gap-y-5 px-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+  <ul class="grid grid-cols-2 gap-x-4 gap-y-5 px-4 @md:grid-cols-3 @2xl:grid-cols-4 @4xl:grid-cols-5 @6xl:grid-cols-6">
     <li v-for="show in podcasts.getters.shows.value" :key="show.url">
       <button type="button" class="group w-full text-left" @click="nav.push({ kind: 'podcast', show })">
         <span class="block aspect-square overflow-hidden rounded-xl bg-neutral-800">

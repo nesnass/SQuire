@@ -1,24 +1,46 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { fetchAlbums } from '@/lms/library'
+import { appearsOn } from '@/lms/credits'
+import { ALBUM_ARTIST_ROLES, fetchAlbums } from '@/lms/library'
+import type { Album } from '@/lms/types'
 import AlbumTile from './AlbumTile.vue'
 import BackHeader from './BackHeader.vue'
-import LoadMore from './LoadMore.vue'
 import PlayBar from './PlayBar.vue'
-import { usePaged } from './usePaged'
 import { addToPlaylistAction, artistFavorite, trackUrls, usePlayActions } from './playActions'
+
+// More than any one artist has in practice; both lists are needed whole to tell them apart
+const MAX_ALBUMS = 500
 
 const props = defineProps<{ id: number; name: string }>()
 const { openActions } = usePlayActions()
 const heading = ref<HTMLElement | null>(null)
 
-const albums = usePaged((start, n) => fetchAlbums(start, n, { artistId: props.id, sort: 'yearalbum' }))
+const own = ref<Album[] | null>(null)
+const others = ref<Album[]>([])
+const error = ref(false)
+
 const target = computed(() => ({ artist_id: props.id }))
 const favorite = computed(() => artistFavorite(props.name))
 const addToPlaylist = addToPlaylistAction({ title: props.name, urls: () => trackUrls({ artistId: props.id }) })
 
+// "Albums" is where they're the album's artist; "Appears on" is every other album with any credit for them,
+// compilations included
+async function load() {
+  error.value = false
+  try {
+    const [mine, all] = await Promise.all([
+      fetchAlbums(0, MAX_ALBUMS, { artistId: props.id, roleId: ALBUM_ARTIST_ROLES, compilation: 0, sort: 'yearalbum' }),
+      fetchAlbums(0, MAX_ALBUMS, { artistId: props.id, sort: 'yearalbum' }),
+    ])
+    own.value = mine.items
+    others.value = appearsOn(all.items, mine.items)
+  } catch {
+    error.value = true
+  }
+}
+
 onMounted(() => {
-  albums.reset()
+  void load()
   heading.value?.focus()
 })
 </script>
@@ -28,8 +50,10 @@ onMounted(() => {
     <BackHeader :title="props.name" />
     <header class="px-4 pt-2">
       <h1 ref="heading" tabindex="-1" class="text-3xl font-bold outline-none">{{ props.name }}</h1>
-      <p v-if="albums.count.value !== null" class="text-sm text-neutral-400">
-        {{ albums.count.value }} {{ albums.count.value === 1 ? 'album' : 'albums' }}
+      <p v-if="own" class="text-sm text-neutral-400">
+        {{ own.length }} {{ own.length === 1 ? 'album' : 'albums' }}<template v-if="others.length">
+          · appears on {{ others.length }}</template
+        >
       </p>
     </header>
 
@@ -40,12 +64,28 @@ onMounted(() => {
       @more="openActions(target, { title: props.name }, { favorite, extra: [addToPlaylist] })"
     />
 
-    <h2 class="px-4 pb-3 text-lg font-semibold">Albums</h2>
-    <ul class="grid grid-cols-2 gap-x-4 gap-y-5 px-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-      <li v-for="a in albums.items.value" :key="a.id">
-        <AlbumTile :album="a" :show-artist="a.artist_id !== props.id" />
-      </li>
-    </ul>
-    <LoadMore :loading="albums.loading.value" :error="albums.error.value" :done="albums.done.value" @more="albums.more" />
+    <p v-if="error" class="flex items-center justify-center gap-3 px-4 py-10 text-sm text-neutral-400">
+      Couldn't load albums
+      <button type="button" class="min-h-11 rounded-full bg-neutral-800 px-4 text-neutral-100" @click="load">Retry</button>
+    </p>
+    <p v-else-if="!own" class="px-4 py-10 text-center text-neutral-400">Loading…</p>
+
+    <section v-if="own?.length" aria-labelledby="artist-albums">
+      <h2 id="artist-albums" class="px-4 pb-3 text-lg font-semibold">Albums</h2>
+      <ul class="grid grid-cols-2 gap-x-4 gap-y-5 px-4 @md:grid-cols-3 @2xl:grid-cols-4 @4xl:grid-cols-5 @6xl:grid-cols-6">
+        <li v-for="a in own" :key="a.id">
+          <AlbumTile :album="a" :show-artist="a.artist_id !== props.id" />
+        </li>
+      </ul>
+    </section>
+
+    <section v-if="others.length" aria-labelledby="artist-appears" class="pt-6">
+      <h2 id="artist-appears" class="px-4 pb-3 text-lg font-semibold">Appears on</h2>
+      <ul class="grid grid-cols-2 gap-x-4 gap-y-5 px-4 @md:grid-cols-3 @2xl:grid-cols-4 @4xl:grid-cols-5 @6xl:grid-cols-6">
+        <li v-for="a in others" :key="a.id">
+          <AlbumTile :album="a" />
+        </li>
+      </ul>
+    </section>
   </article>
 </template>

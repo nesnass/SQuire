@@ -19,3 +19,9 @@ The dev server proxies `/jsonrpc.js`, `/music`, `/imageproxy`, `/plugins` and `/
 LMS caches `index.html` for up to an hour and a build deletes the assets it names, so restart LMS after `pnpm build` or the skin won't load. `pnpm build:dev` keeps earlier assets, so the cached page still loads until LMS picks up the new one.
 
 To use Squire inside the LyrPlay iOS app, see [docs/lyrplay-bridge.md](docs/lyrplay-bridge.md).
+
+## Releasing
+
+`scripts/release.sh <base URL>` builds the skin and writes `dist/Squire-<version>.zip` and `dist/repo.xml`, with the zip's URL under `<base URL>`. Publish both and add the `repo.xml` URL under Settings → Plugins in LMS. Bump the version in `package.json` and `plugin/Squire/install.xml` together.
+
+GitHub Actions runs `pnpm typecheck` and `pnpm test` on pushes to `main` and on pull requests.

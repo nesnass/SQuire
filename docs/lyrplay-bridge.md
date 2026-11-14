@@ -77,7 +77,7 @@ LyrPlay calls these globals with `evaluateJavaScript`. Each call is guarded with
 | `lmsIsConnected`, `app.cometd`, `app.connectToCometD()` | After a network handover (`MaterialReconnect.swift`) | `connectToCometD` polls now; `lmsIsConnected` stays undefined until the first poll, so the script leaves the page alone during load |
 | `--top-pad` CSS variable | On load, rotation, and resume; re-injected if it changes | Top padding uses `var(--top-pad, env(safe-area-inset-top))` |
 
-LyrPlay also sets `window.lyrplayStreamText` (for example `FLAC, 44.1kHz, 16bit, 850kbps`) and `window.lyrplayPlayerId` while it plays. Squire doesn't show them yet.
+LyrPlay also sets `window.lyrplayStreamText` (for example `FLAC, 44.1kHz, 16bit, 850kbps`) and `window.lyrplayPlayerId` while it plays. When that player is the active one, now playing shows the stream text in place of the file details.
 
 Its remaining scripts target Material's DOM and globals (`TB_APP_SETTINGS`, `lmsApp`, `.np-bar-tech`) and do nothing here.
 

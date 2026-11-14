@@ -90,16 +90,16 @@ onMounted(() => input.value?.focus())
           placeholder="Search, or paste a link"
           aria-label="Search podcasts, or paste an Apple Podcasts or RSS link"
           aria-describedby="podcast-search-hint"
-          class="min-h-12 w-full rounded-xl bg-neutral-800 pr-4 pl-10 text-base outline-none placeholder:text-neutral-500 focus:ring-2 focus:ring-accent"
+          class="min-h-12 w-full rounded-xl bg-neutral-800 pr-4 pl-10 text-base outline-none placeholder:text-neutral-400 focus:ring-2 focus:ring-accent"
         />
       </div>
-      <p id="podcast-search-hint" class="mt-2 text-sm text-neutral-500">
+      <p id="podcast-search-hint" class="mt-2 text-sm text-neutral-400">
         Search by name, or paste an Apple Podcasts link or an RSS feed address.
       </p>
     </div>
 
     <p v-if="error" role="alert" class="px-4 py-6 text-center text-neutral-400">Search failed: {{ error }}</p>
-    <p v-else-if="loading && !results" class="px-4 py-6 text-center text-neutral-500">Searching…</p>
+    <p v-else-if="loading && !results" class="px-4 py-6 text-center text-neutral-400">Searching…</p>
     <p v-else-if="results && !results.length" class="px-4 py-6 text-center text-neutral-400">No podcasts found</p>
     <ul v-else-if="results" class="pt-4" :aria-busy="loading">
       <li v-for="show in results" :key="show.feedUrl" class="flex items-center gap-3 px-4 py-2">

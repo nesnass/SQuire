@@ -30,10 +30,17 @@ function choose(action: SheetAction, close: () => void) {
             type="button"
             class="flex min-h-13 w-full items-center gap-4 px-5 text-left active:bg-neutral-800"
             :class="{ 'text-red-400': action.danger }"
+            :aria-pressed="action.selected === undefined ? undefined : action.selected"
             @click="choose(action, close)"
           >
-            <Icon :name="action.icon" class="size-6" :class="action.danger ? 'text-red-400' : 'text-neutral-400'" />
-            {{ action.label }}
+            <Icon
+              v-if="action.icon"
+              :name="action.icon"
+              class="size-6"
+              :class="action.danger ? 'text-red-400' : 'text-neutral-400'"
+            />
+            <span class="flex-1">{{ action.label }}</span>
+            <Icon v-if="action.selected" name="check" class="size-5 text-accent" />
           </button>
         </li>
       </ul>

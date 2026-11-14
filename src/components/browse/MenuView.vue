@@ -71,7 +71,7 @@ onMounted(() => {
               autocomplete="off"
               :placeholder="label(item)"
               :aria-label="label(item)"
-              class="min-h-12 w-full rounded-xl bg-neutral-800 pr-4 pl-10 text-base outline-none placeholder:text-neutral-500 focus:ring-2 focus:ring-accent"
+              class="min-h-12 w-full rounded-xl bg-neutral-800 pr-4 pl-10 text-base outline-none placeholder:text-neutral-400 focus:ring-2 focus:ring-accent"
             />
           </div>
         </form>

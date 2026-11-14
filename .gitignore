@@ -1,3 +1,4 @@
 node_modules
 plugin/Squire/HTML
 **/.DS_Store
+dist

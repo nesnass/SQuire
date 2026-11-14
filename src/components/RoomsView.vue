@@ -38,7 +38,7 @@ function enable(id: string) {
         </button>
       </div>
     </header>
-    <ul class="grid grid-cols-1 items-start gap-3 md:grid-cols-2 xl:grid-cols-3">
+    <ul class="grid grid-cols-1 items-start gap-3 @2xl:grid-cols-2 @5xl:grid-cols-3">
       <li v-for="room in getters.rooms.value" :key="room.id">
         <RoomCard :room="room" @group="emit('group', $event)" />
       </li>

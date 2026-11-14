@@ -1,18 +1,19 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
-import { fetchAlbums, fetchPlaylists } from '@/lms/library'
+import { computed, onMounted, ref, watch } from 'vue'
+import { fetchAlbums } from '@/lms/library'
 import useFavoritesStore from '@/store/useFavoritesStore'
 import Icon from '../Icon.vue'
-import { playlistsVersion } from '../overlays'
 import AlbumTile from './AlbumTile.vue'
 import FavoriteRow from './FavoriteRow.vue'
-import PlaylistRow from './PlaylistRow.vue'
 import PodcastEpisodeLists from './PodcastEpisodeLists.vue'
+import { useNav } from './nav'
 import { usePaged } from './usePaged'
 
 type Recent = 'added' | 'played'
 
 const RECENT = 20
+// Home should fit in about two screens; the rest are one tap away
+const FAVORITES_SHOWN = 8
 const RECENT_KEY = 'squire.homeRecent'
 const recentOptions: { id: Recent; label: string }[] = [
   { id: 'added', label: 'Recently added' },
@@ -27,8 +28,9 @@ function readSavedRecent(): Recent {
   }
 }
 
+const nav = useNav()
 const favorites = useFavoritesStore()
-const playlists = usePaged((start, n) => fetchPlaylists(start, n), 500)
+const shownFavorites = computed(() => favorites.getters.items.value.slice(0, FAVORITES_SHOWN))
 // One list per choice, so switching back shows the other straight away
 const recentLists = {
   added: usePaged((start, n) => fetchAlbums(start, n, { sort: 'new' }), RECENT),
@@ -37,7 +39,6 @@ const recentLists = {
 const recentChoice = ref<Recent>(readSavedRecent())
 const recent = () => recentLists[recentChoice.value]
 
-watch(playlistsVersion, playlists.reset)
 // Play history moves on while listening, so it's fetched again each time it's chosen
 watch(recentChoice, (choice) => {
   try {
@@ -50,7 +51,6 @@ watch(recentChoice, (choice) => {
 
 onMounted(() => {
   void favorites.actions.refresh()
-  playlists.reset()
   recent().reset()
 })
 </script>
@@ -60,9 +60,19 @@ onMounted(() => {
     <h1 id="home-title" class="px-4 pt-4 text-3xl font-bold">Home</h1>
 
     <section aria-labelledby="home-favorites" class="pt-5">
-      <h2 id="home-favorites" class="px-4 pb-1 text-lg font-semibold">Favourites</h2>
-      <ul v-if="favorites.getters.items.value.length">
-        <li v-for="f in favorites.getters.items.value" :key="f.id"><FavoriteRow :favorite="f" /></li>
+      <div class="flex items-center justify-between pr-2 pb-2 pl-4">
+        <h2 id="home-favorites" class="text-lg font-semibold">Favourites</h2>
+        <button
+          v-if="favorites.getters.items.value.length > FAVORITES_SHOWN"
+          type="button"
+          class="min-h-11 rounded-full px-3 text-sm font-medium text-accent active:bg-neutral-900"
+          @click="nav.push({ kind: 'favorites', id: '', name: 'Favourites' })"
+        >
+          Show all <span class="sr-only">favourites</span>
+        </button>
+      </div>
+      <ul v-if="shownFavorites.length" class="grid grid-cols-2 gap-2 px-4 @2xl:grid-cols-3 @4xl:grid-cols-4">
+        <li v-for="f in shownFavorites" :key="f.id"><FavoriteRow :favorite="f" tile /></li>
       </ul>
       <p v-else-if="favorites.getters.loaded.value" class="mx-4 mt-2 flex items-center gap-3 rounded-2xl bg-neutral-900 p-4 text-sm text-neutral-400">
         <Icon name="heartOutline" class="size-6 shrink-0" />
@@ -93,16 +103,9 @@ onMounted(() => {
           <AlbumTile :album="a" />
         </li>
       </ul>
-      <p v-else-if="recent().done.value" class="px-4 text-sm text-neutral-500">
+      <p v-else-if="recent().done.value" class="px-4 text-sm text-neutral-400">
         {{ recentChoice === 'played' ? 'Albums you play will show up here.' : 'No albums yet.' }}
       </p>
-    </section>
-
-    <section v-if="playlists.items.value.length" aria-labelledby="home-playlists" class="pt-6">
-      <h2 id="home-playlists" class="px-4 pb-1 text-lg font-semibold">Playlists</h2>
-      <ul>
-        <li v-for="p in playlists.items.value" :key="p.id"><PlaylistRow :playlist="p" /></li>
-      </ul>
     </section>
   </section>
 </template>

@@ -2,10 +2,15 @@ import { ref, computed } from 'vue'
 import { createStore } from './dev-store'
 import { lmsCommand, lmsQuery } from '@/lms/client'
 import { isStalled, isWaiting, waitingSince, type WaitTimes } from '@/lms/playback'
+import { movedIndex } from '@/lms/queue'
 import type { LmsCommand, Player, PlayersResponse, PlayTarget, StatusResponse, SyncGroupsResponse, Track } from '@/lms/types'
 
-const TRACK_TAGS = 'tags:acdlKorITuxN'
-const POLL_MS = 2000
+const TRACK_TAGS = 'tags:acdelKorsITuxN'
+// Fast while something is playing, being watched or just changed; slow otherwise, to spare a phone's battery
+const POLL_FAST_MS = 2000
+const POLL_IDLE_MS = 8000
+const RECENT_COMMAND_MS = 10_000
+const TICK_MS = 1000
 // A poll stuck on a connection iOS dropped while suspended is abandoned so the next one can go through
 const REFRESH_TIMEOUT_MS = 4000
 // LMS answers nothing while it waits on a disk, so a few slow polls in a row mean busy rather than gone
@@ -36,6 +41,10 @@ export interface Room {
   // LMS says play but the player never started; only a jump gets it going again
   isStalled: boolean
   volume: number
+  // False when LMS reports the room switched off
+  power: boolean
+  canPowerOff: boolean
+  sleepIn?: number
 }
 
 export interface DisabledPlayer {
@@ -78,10 +87,18 @@ function usePlayerStore() {
   const starting = ref(0)
 
   let queueKey = ''
+  const queueLoading = ref(false)
+  const queueLoadError = ref<string | null>(null)
+  // Queue edits run one at a time, and the queue isn't refetched mid-way so the optimistic list isn't overwritten
+  let queueEdits = Promise.resolve()
+  let queueEditsPending = 0
   let disabledKey = ''
   let disabledAt = 0
   // Polls that started before the latest command are discarded so they can't undo optimistic updates
   let lastMutation = 0
+  let lastRefreshAt = 0
+  // Sheets showing live state (now playing, queue, outputs) ask for fast polling while open
+  const watching = ref(false)
   // Only the latest refresh may apply its results; starting one cancels the one before
   let inflight: AbortController | null = null
   let commandsInFlight = 0
@@ -132,6 +149,9 @@ function usePlayerStore() {
         isWaiting: Boolean(status && isWaiting(status)) && !stalled,
         isStalled: stalled,
         volume: Math.max(0, ...members.map((m) => m.volume)),
+        power: status?.power !== 0,
+        canPowerOff: ids.some((id) => players.value.find((p) => p.playerid === id)?.canpoweroff),
+        sleepIn: status?.will_sleep_in,
       }
     })
   })
@@ -166,6 +186,10 @@ function usePlayerStore() {
     }),
     status: computed(() => activeRoom.value?.status),
     queue: computed(() => queue.value),
+    // The queue is fetched a page at a time; this is its full length
+    queueTotal: computed(() => activeRoom.value?.status?.playlist_tracks ?? queue.value.length),
+    queueLoading: computed(() => queueLoading.value),
+    queueLoadError: computed(() => queueLoadError.value),
     error: computed(() => error.value),
     reachable: computed(() => reachable.value),
     // Also true when something else started the room, since LMS reports the wait either way
@@ -198,7 +222,11 @@ function usePlayerStore() {
     for (const id of ids) {
       const snap = snapshots.value[id]
       if (!snap) continue
-      snap.status = { ...snap.status, ...update }
+      // Rebase the clock to now, so a patched time or mode doesn't shift the position by the time since the poll
+      const s = snap.status
+      const elapsed = s.mode === 'play' && !isWaiting(s) ? (lastMutation - snap.fetchedAt) / 1000 : 0
+      snap.fetchedAt = lastMutation
+      snap.status = { ...s, time: (s.time ?? 0) + elapsed, ...update }
       // A new mode starts the wait over, so a stalled room doesn't stay stalled once it's told to play
       if (update.mode) {
         snap.status.waitingToPlay = undefined
@@ -224,12 +252,14 @@ function usePlayerStore() {
   async function refreshQueue(signal?: AbortSignal) {
     const id = activeId.value
     const status = activeRoom.value?.status
-    if (!id || !status) return
+    if (!id || !status || queueEditsPending) return
     const key = `${id}:${status.playlist_timestamp}`
     if (key === queueKey) return
     queueKey = key
     try {
-      const res = await lmsQuery<StatusResponse>(id, ['status', 0, QUEUE_PAGE, TRACK_TAGS], signal)
+      // As many rows as are shown, so a long queue that was scrolled doesn't collapse back to one page
+      const rows = Math.max(QUEUE_PAGE, queue.value.length)
+      const res = await lmsQuery<StatusResponse>(id, ['status', 0, rows, TRACK_TAGS], signal)
       if (id === activeId.value) queue.value = res.playlist_loop ?? []
     } catch (e) {
       // Let the next poll retry instead of treating this playlist as loaded
@@ -262,6 +292,7 @@ function usePlayerStore() {
     const { signal } = controller
     const timer = setTimeout(() => controller.abort(new Error('LMS did not respond')), REFRESH_TIMEOUT_MS)
     const startedAt = performance.now()
+    lastRefreshAt = startedAt
     try {
       const [pl, sg] = await Promise.all([
         lmsQuery<PlayersResponse>('', ['players', 0, 100], signal),
@@ -336,6 +367,25 @@ function usePlayerStore() {
     if (refreshAfter) await refresh()
   }
 
+  function editQueue(change: (items: Track[]) => void, update: Partial<StatusResponse>, command: LmsCommand) {
+    const id = activeId.value
+    const items = [...queue.value]
+    change(items)
+    items.forEach((t, i) => (t['playlist index'] = i))
+    queue.value = items
+    patch(memberIds(), update)
+    queueEditsPending++
+    const run = queueEdits
+      .then(() => send(id, command))
+      .finally(async () => {
+        if (--queueEditsPending) return
+        queueKey = ''
+        await refreshQueue().catch(() => undefined)
+      })
+    queueEdits = run.catch(() => undefined)
+    return run
+  }
+
   // Covers the follow-up refresh too, so the old track isn't shown as current once the command returns
   async function whileStarting<T>(run: () => Promise<T>): Promise<T> {
     starting.value++
@@ -369,6 +419,9 @@ function usePlayerStore() {
 
   const actions = {
     refresh,
+    setWatching(on: boolean) {
+      watching.value = on
+    },
     focus(name: string) {
       focusName.value = name
     },
@@ -377,8 +430,14 @@ function usePlayerStore() {
       started = true
       void refresh()
       setInterval(() => {
-        if (document.visibilityState === 'visible') poll()
-      }, POLL_MS)
+        if (document.visibilityState !== 'visible') return
+        const t = performance.now()
+        const busy =
+          watching.value ||
+          t - lastMutation < RECENT_COMMAND_MS ||
+          rooms.value.some((r) => r.isPlaying || r.isWaiting || r.isStalled)
+        if (t - lastRefreshAt >= (busy ? POLL_FAST_MS : POLL_IDLE_MS)) poll()
+      }, TICK_MS)
       setInterval(() => (now.value = performance.now()), 250)
       // A poll frozen mid-flight by iOS would otherwise land late with the track from before suspension
       document.addEventListener('visibilitychange', () => {
@@ -407,6 +466,40 @@ function usePlayerStore() {
     next: () => whileStarting(() => send(commandTarget(), ['playlist', 'index', '+1'])),
     previous: () => whileStarting(() => send(commandTarget(), ['playlist', 'index', '-1'])),
     playIndex: (index: number) => whileStarting(() => send(commandTarget(), ['playlist', 'index', index])),
+    async loadMoreQueue() {
+      const id = activeId.value
+      const key = queueKey
+      if (!id || queueLoading.value) return
+      queueLoading.value = true
+      queueLoadError.value = null
+      try {
+        const res = await lmsQuery<StatusResponse>(id, ['status', queue.value.length, QUEUE_PAGE, TRACK_TAGS])
+        if (id === activeId.value && key === queueKey) queue.value = [...queue.value, ...(res.playlist_loop ?? [])]
+      } catch (e) {
+        queueLoadError.value = e instanceof Error ? e.message : String(e)
+      } finally {
+        queueLoading.value = false
+      }
+    },
+    removeFromQueue(index: number) {
+      const cur = getters.currentIndex.value
+      const total = getters.queueTotal.value
+      return editQueue(
+        (items) => items.splice(index, 1),
+        { playlist_cur_index: cur > index ? cur - 1 : cur, playlist_tracks: Math.max(0, total - 1) },
+        ['playlist', 'delete', index],
+      )
+    },
+    moveInQueue(from: number, to: number) {
+      return editQueue(
+        (items) => items.splice(to, 0, ...items.splice(from, 1)),
+        { playlist_cur_index: movedIndex(getters.currentIndex.value, from, to) },
+        ['playlist', 'move', from, to],
+      )
+    },
+    clearQueue() {
+      return editQueue((items) => items.splice(0), { playlist_tracks: 0, mode: 'stop' }, ['playlist', 'clear'])
+    },
     seek(seconds: number) {
       patch(memberIds(), { time: seconds })
       return send(commandTarget(), ['time', Math.round(seconds)])
@@ -463,8 +556,30 @@ function usePlayerStore() {
       if (disabled && wasPlaying) await send(playerId, ['pause', 1], false)
       await refresh()
     },
+    // Sent to every member, so a synced room sleeps or switches off as one whatever LMS's sync prefs say
+    setSleep(roomId: string, seconds: number) {
+      const ids = memberIds(roomId)
+      patch(ids, { will_sleep_in: seconds || undefined })
+      return Promise.all(ids.map((id) => send(id, ['sleep', Math.round(seconds)], false))).then(() => refresh())
+    },
+    setPower(roomId: string, on: boolean) {
+      const ids = memberIds(roomId)
+      patch(ids, on ? { power: 1 } : { power: 0, mode: 'pause' })
+      return Promise.all(ids.map((id) => send(id, ['power', on ? 1 : 0], false))).then(() => refresh())
+    },
+    // Random Mix plugin: LMS keeps topping up the queue from the library until it's stopped
+    randomMix(kind: 'tracks' | 'albums' | 'contributors' | 'disable'): Promise<boolean> {
+      const id = commandTarget()
+      if (!id) return Promise.resolve(false)
+      if (kind === 'disable') {
+        patch(memberIds(), { randomplay: 0 })
+        return send(id, ['randomplay', 'disable']).then(() => true)
+      }
+      patch(memberIds(), { randomplay: 1, mode: 'play' })
+      return whileStarting(() => send(id, ['randomplay', kind])).then(() => true)
+    },
     async playAll() {
-      const ready = rooms.value.filter((r) => r.members[0].connected && (r.status?.playlist_tracks ?? 0) > 0)
+      const ready = rooms.value.filter((r) => r.members[0].connected && r.power && (r.status?.playlist_tracks ?? 0) > 0)
       for (const r of ready) patch(memberIds(r.id), { mode: 'play' })
       await Promise.all(ready.map((r) => send(r.members[0].id, playCommand(r), false)))
       await refresh()

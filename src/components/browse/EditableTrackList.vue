@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref } from 'vue'
-import { coverUrl } from '@/lms/format'
-import type { LibraryTrack } from '@/lms/types'
 import Icon from '../Icon.vue'
 
-const props = defineProps<{ tracks: LibraryTrack[] }>()
+export interface EditableRow {
+  // Unique even when the same song is listed twice
+  key: string
+  title: string
+  subtitle?: string
+  art?: string
+}
+
+const props = defineProps<{ tracks: EditableRow[] }>()
 const emit = defineEmits<{ remove: [index: number]; move: [from: number, to: number] }>()
 
 const EDGE_PX = 72
@@ -85,11 +91,11 @@ async function onKey(event: KeyboardEvent, index: number) {
   const to = event.key === 'ArrowUp' ? index - 1 : event.key === 'ArrowDown' ? index + 1 : null
   if (to === null || to < 0 || to >= props.tracks.length) return
   event.preventDefault()
-  const id = props.tracks[index].id
+  const key = props.tracks[index].key
   move(index, to)
   // Keeps focus on the moved song's handle so repeated presses keep moving it
   await nextTick()
-  list.value?.querySelector<HTMLElement>(`[data-handle="${id}"]`)?.focus()
+  list.value?.querySelector<HTMLElement>(`[data-handle="${CSS.escape(key)}"]`)?.focus()
 }
 
 // Rows between the dragged row's start and target shift by one row to open a gap
@@ -112,7 +118,7 @@ onBeforeUnmount(() => cancelAnimationFrame(frame))
     <ol ref="list">
       <li
         v-for="(t, i) in props.tracks"
-        :key="t.id"
+        :key="t.key"
         class="relative flex items-center bg-neutral-950"
         :class="[
           dragFrom === i ? 'z-10 bg-neutral-800 shadow-xl' : '',
@@ -131,19 +137,19 @@ onBeforeUnmount(() => cancelAnimationFrame(frame))
           </span>
         </button>
         <img
-          :src="coverUrl(t.artwork_track_id, 96)"
+          :src="t.art"
           alt=""
           loading="lazy"
           class="size-11 shrink-0 rounded bg-neutral-800 object-cover"
         />
         <span class="min-w-0 flex-1 px-3 py-1.5">
           <span class="block truncate">{{ t.title }}</span>
-          <span class="block truncate text-sm text-neutral-400">{{ t.artist }}</span>
+          <span class="block truncate text-sm text-neutral-400">{{ t.subtitle }}</span>
         </span>
         <button
           type="button"
           class="flex size-12 shrink-0 cursor-grab touch-none items-center justify-center text-neutral-500 active:cursor-grabbing"
-          :data-handle="t.id"
+          :data-handle="t.key"
           :aria-label="`Reorder ${t.title}, position ${i + 1} of ${props.tracks.length}`"
           aria-describedby="reorder-hint"
           @pointerdown="onPointerDown($event, i)"

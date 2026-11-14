@@ -42,7 +42,7 @@ iOS kills, and LyrPlay's reconnect path already assumes a poll.
 
 Tune it instead:
 
-- Drop `syncgroups`. Each `status` response already carries `sync_master` and `sync_slaves`.
+- Drop `syncgroups` if each `status` response carries `sync_master` and `sync_slaves` (unconfirmed).
 - Poll at 2 s only while a room is playing, a sheet is open, or for ~10 s after a command; otherwise 5–10 s.
 - `fetchDisabled` sends one `playerpref` query per player every 30 s. Fine at this size; leave it.
 
@@ -222,26 +222,20 @@ wherever Library was; radio and podcast items show plain text.
 Rule: **back closes the topmost thing the user can see** — the top sheet, else the top level of the current
 tab's stack. At a tab's root, back leaves Squire as it does today. Tabs are not history entries.
 
-`src/components/history.ts` holds an ordered list of layers `{ close: () => void }` and mirrors it in
-browser history:
+`src/components/history.ts` keeps a list of open layers (sheets and stack levels) and holds **one** history
+entry of its own above the page while any layer the user can see is open:
 
-- `openLayer(close)`: `history.pushState({ squire: depth }, '')` (same URL), append the layer.
-- `closeLayers(n = 1)`: `history.go(-n)`. Every close goes through here, including the Back button in
-  `BackHeader`, sheet close/drag/backdrop/Escape, and `reselect`.
-- One `popstate` listener: read the target depth from `event.state?.squire ?? 0` and call `close` on each
-  layer above it, newest first. This is the only place a layer is actually closed, so UI back and browser
-  back cannot diverge.
-- `suspend(n)` / `resume(layers)` for tab switches: leaving a tab with `n` levels open does `history.go(-n)`
-  with closing suppressed, then pushes one entry per level of the tab being entered. Sheets are modal, so
-  none can be open during a switch.
+- `openLayer({ close, active })` registers a layer and returns its release. A stack level is `active` only
+  while its tab shows.
+- `popstate` closes the topmost active layer; the entry is pushed again if more remain.
+- Closing from the UI (Back button, drag, Escape, backdrop) releases the layer; when nothing active is left,
+  the entry is removed with `history.back()` and the resulting `popstate` is ignored.
+- Syncing runs in a microtask, so a layer closing and another opening in the same tick (action sheet to
+  confirm sheet) keep the entry. A tab switch resyncs.
 
-`StackView` calls `openLayer` in `push` and `closeLayers` in `pop`/`reselect`; the array mutation moves into
-the layer's `close`. `BottomSheet` calls `openLayer` on mount; its `close()` becomes `closeLayers()` and the
-existing leave animation runs from the layer's `close`. The Escape handler and `sheetStack.ts` go away,
-since history order now says which sheet is on top.
-
-Keep the layer list a pure module with tests for: open/close order, `go(-n)` closing n layers, suspend and
-resume across a tab switch, and a stray `popstate` with nothing open.
+One entry per layer was rejected: `history.back()` completes later, so keeping several entries in step
+races with a layer opened in the same tick. Tests in `history.test.ts` cover this with a history whose
+`back()` lands asynchronously.
 
 Transition: levels in `StackView` slide in from the right over 200 ms and out the same way, with
 `motion-reduce:duration-0`, using the same `Transition` classes approach as `BottomSheet`.
@@ -266,52 +260,43 @@ Group by what relates. Albums, artists, genres, years and random mix are all vie
 podcasts and radio are separate worlds (nothing in them can go on a playlist); playlists are used often
 enough to stay top-level.
 
-Switcher: **Music · Playlists · Podcasts · Radio**. Four whole labels fit at 390 px; drop the `short`
-mechanism. On `lg:` (P3.1) these become four entries in the side rail.
+Switcher: **Music · Playlists · Podcasts · Radio**. Four whole labels fit at 390 px. On wide screens (P3.1)
+the tabs, not these, move to the side rail.
 
 Music:
 
-- A second, smaller control: **Albums · Artists**.
-- Below it a row of chips: **Sort** (albums only, the existing three sorts), **Genre**, **Year**, and a
-  **Shuffle** button at the end. Genre and Year are filters on the list, not separate screens: picking
-  Jazz shows Jazz albums (or artists); a set chip shows its value and an ×.
-- Genre opens a sheet listing all genres with the letter rail; Year opens a sheet of years grouped by
-  decade, newest first. Both: `genres 0 N` ✓, `years 0 N` ✓.
-- Albums filter with `genre_id:` ✓ and `year:` ✓; artists with `genre_id:` ✗. Both filters together ✗ —
-  confirm, else make them exclusive.
-- With a filter set, a Play/Shuffle bar plays what's listed: `playlistcontrol cmd:load genre_id:… | year:…`
-  ✗ — confirm before wiring.
-- Shuffle opens an action sheet: Random songs, Random albums, Random artists, and Stop when `status.randomplay`
-  ✓ is set. `randomplay tracks|albums|contributors|disable` ✗. Hidden when `can randomplay ?` is 0 ✓.
+- A second, smaller control, **Albums · Artists**, with **Random mix** at the end of the same row.
+- Below it a row of chips: **Sort** (albums only), **Genre**, **Year** (albums only). Genre and Year are
+  filters on the list: picking Jazz shows Jazz albums (or artists); a set chip shows its value and an ×.
+- Genre opens a sheet of all genres with a filter field; Year opens a sheet of years by decade, newest
+  first. `genres 0 N` ✓, `years 0 N` ✓.
+- Albums filter with `genre_id:` ✓ and `year:` ✓, together too ✓; artists with `genre_id:` ✓.
+- With a filter set, a Play/Shuffle bar plays what's listed: `playlistcontrol cmd:load genre_id:… year:…` ✗.
+- Random mix opens an action sheet: Random songs, albums, artists, and Stop while `status.randomplay` ✓ is
+  set. `randomplay tracks|albums|contributors|disable` ✗. Hidden when `can randomplay ?` is 0 ✓.
 
-- Artists lists album artists: `role_id:ALBUMARTIST,ARTIST` ✓ (1324 of 1967). Today's unfiltered list also
-  holds 707 composers and 582 track-only artists (guests, compilation tracks), most of whom have no album
-  of their own. Those stay reachable through Search and an album's credits.
-- On Artists the chip row is **Genre** and **Role**. Role is Album artists (default), Composers or Guests.
-  Composers and Guests are only the people with no album-artist credit: on this server 548 composers and
-  90 guests, from the full list minus `role_id:ALBUMARTIST,ARTIST` ✓, and `role_id:COMPOSER` /
-  `role_id:TRACKARTIST` ✓ to tell them apart. LMS can't exclude a role in one query, so the ids are fetched
-  once per session (about 215 KB for all 1967) and the difference is taken in the client. Genre is hidden
-  under Composers and Guests. Drop the `<?>` entry.
-- A composer or guest opens a track list rather than an album grid: `titles artist_id:<id> tags:…` ✓,
-  grouped by album, each row playable and with the usual ⋯ sheet. Their albums are mostly someone else's
-  compilations, so a grid would show the wrong covers.
+Artists:
+
+- **Role** chip: Album artists (default), Composers, Other artists. Genre applies to album artists only.
+- Album artists are `role_id:ALBUMARTIST` ✓ (555). `ALBUMARTIST,ARTIST` (1324) is wrong in a tagged library:
+  track artists on compilations carry ARTIST too, and 779 of those 1324 have no album of their own. A
+  library with no ALBUMARTIST tags at all falls back to `ALBUMARTIST,ARTIST`.
+- Composers (609) are `role_id:COMPOSER` minus album artists; Other artists (858) are
+  `role_id:ARTIST,TRACKARTIST` minus album artists: guests and compilation-only artists. LMS can't exclude a
+  role in one query, so both lists are fetched whole once per session and differenced in the client. 62
+  people are in both; 7 (conductors, bands) are in neither and are reachable through Search.
+- A composer or other artist opens their tracks grouped by album (`titles artist_id:<id> sort:albumtrack` ✓),
+  not an album grid: their albums are other people's. Play plays exactly those tracks
+  (`playlistcontrol track_id:<a>,<b>,…` ✗).
 - Composer names come from the tags as written. With LMS splitting on `;` (`splitList` ✓), credits
-  written as `Brian Holland/Eddie Holland/Lamont Dozier` arrive as one name. Squire shows them as they are;
-  splitting on `/` would break names like AC/DC, so fixing them is a tagging job.
-- An album artist's own page (`ArtistView`) splits into **Albums** (`albums artist_id:<id>
-  role_id:ALBUMARTIST,ARTIST` ✓) and **Appears on**: every album with any credit (`albums artist_id:<id>` ✓,
-  what the page lists today, mixed together) minus those. Each Appears on tile is labelled with the album's
-  own artist. Example: David Bowie has 11 albums and appears on Nirvana's *MTV Unplugged in New York* as a
-  composer. The section is hidden when empty.
-
-Code: `library.ts` gains `fetchGenres`, `fetchYears`, and `genreId`/`year` options on `fetchAlbums` and
-`fetchArtists`. The albums/artists half of `BrowseView` moves into `MusicView.vue`; `BrowseView` keeps the
-switcher, playlists, podcasts and radio. The selected section and filters are kept per session.
+  written as `Brian Holland/Eddie Holland/Lamont Dozier` arrive as one name; fixing that is a tagging job.
+- An artist page splits into **Albums** (`albums artist_id:<id> role_id:ALBUMARTIST,ARTIST compilation:0` ✓)
+  and **Appears on**: every album with any credit for them minus those. David Bowie: 6 albums; appears on
+  five *Sounds of the Eighties* compilations and, as composer, Nirvana's *MTV Unplugged in New York*.
 
 Done when: the switcher shows whole labels at 390 px; Jazz lists the right albums and artists and its Play
-button plays them; a year works the same way; clearing a chip restores the full list at its scroll
-position; random mix starts, shows as active and stops.
+button plays them; a year works the same way; clearing the last filter returns to the full list where it
+was; random mix starts, shows as active and stops.
 
 ### 2.2 Sleep and power
 
@@ -369,11 +354,10 @@ paragraph — or a note in the README saying why not, and `build:dev` stays.
 - Interval is 2 s when any room is playing or waiting, when now playing, the queue or the output selector is
   open, or within 10 s of `lastMutation`; otherwise 8 s. Hidden pages still don't poll, and becoming visible
   still refreshes at once.
-- `syncgroups`: first group two players and check that `status` returns `sync_master` and `sync_slaves` (no
-  group existed on 2026-11-13, so this is unconfirmed). If it does, build `syncGroups` from the status
-  responses and drop the request. If not, keep it and fetch it only on the slow cadence.
+- `syncgroups` is still requested every poll. To drop it, first group two players and check that `status`
+  returns `sync_master` and `sync_slaves` (no group existed on 2026-11-13).
 
-Done when: idle with nothing playing sends at most `1 + N` requests per 8 s; a play started from another
+Done when: idle with nothing playing sends one poll (`2 + N` requests) per 8 s; a play started from another
 controller shows within 8 s, and within 2 s once anything is playing; the stall and iOS-resume behaviour in
 `playback.test.ts` and the bridge checks are unchanged.
 
@@ -405,6 +389,18 @@ On wide screens (`md:` and up) now playing gets a second state where the cover f
 
 Done when: on an iPad in both orientations and at 1440×900, one tap shows the cover full screen and one tap
 returns to the controls; play/pause works from the bottom bar without leaving the cover.
+
+## Status
+
+Built on `rn/fable-review` (uncommitted at the time of writing): 1.1–1.6, 2.1–2.4, 2.6, 2.7, 3.1, 3.2, 3.4,
+3.6, the CI workflow and release script from 3.3 and 3.5. Wide layout (3.1) starts at 1280 px; content grids
+use container queries so they size to the main column.
+
+Not done:
+
+- 2.5: needs a Perl handler tested against the live LMS.
+- 3.3: moving `@vue/devtools-api` to `devDependencies` and adding `oxlint` (package installs not run).
+- 3.5: plugin icon; hosting for the release zip and `repo.xml`.
 
 ## Open questions
 

@@ -7,7 +7,8 @@ import { useNav } from './nav'
 import { usePlayActions } from './playActions'
 
 // Items inside a favourites folder are already favourites, so they get no ♥ toggle
-const props = defineProps<{ favorite: Favorite; nested?: boolean }>()
+// `tile` is Home's compact grid cell
+const props = defineProps<{ favorite: Favorite; nested?: boolean; tile?: boolean }>()
 const nav = useNav()
 const { play, openActions } = usePlayActions()
 
@@ -41,10 +42,11 @@ function more() {
 </script>
 
 <template>
-  <div class="flex items-center">
+  <div class="flex items-center" :class="{ 'h-full overflow-hidden rounded-xl bg-neutral-900': props.tile }">
     <button
       type="button"
-      class="flex min-h-14 min-w-0 flex-1 items-center gap-3 py-1.5 pl-4 text-left active:bg-neutral-900"
+      class="flex min-w-0 flex-1 items-center gap-3 text-left"
+      :class="props.tile ? 'min-h-16 self-stretch p-2 active:bg-neutral-800' : 'min-h-14 py-1.5 pl-4 active:bg-neutral-900'"
       @click="open"
     >
       <span class="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-neutral-800 text-neutral-500">
@@ -52,14 +54,15 @@ function more() {
         <Icon v-else :name="kind.icon" class="size-6" />
       </span>
       <span class="min-w-0 flex-1">
-        <span class="block truncate">{{ props.favorite.name }}</span>
-        <span v-if="kind.label" class="block truncate text-sm text-neutral-400">{{ kind.label }}</span>
+        <span :class="props.tile ? 'line-clamp-2 text-sm leading-snug font-medium' : 'block truncate'">{{ props.favorite.name }}</span>
+        <span v-if="kind.label && !props.tile" class="block truncate text-sm text-neutral-400">{{ kind.label }}</span>
       </span>
     </button>
     <button
       v-if="!props.favorite.hasitems"
       type="button"
-      class="flex size-12 shrink-0 items-center justify-center text-neutral-400 active:text-neutral-100"
+      class="flex shrink-0 items-center justify-center text-neutral-400 active:text-neutral-100"
+      :class="props.tile ? 'h-full w-10' : 'size-12'"
       :aria-label="`More for ${props.favorite.name}`"
       @click="more"
     >

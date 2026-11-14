@@ -8,14 +8,17 @@ const emit = defineEmits<{ jump: [section: LetterSection] }>()
 const rail = ref<HTMLElement | null>(null)
 const active = ref<{ letter: string; y: number } | null>(null)
 
-// The rail is fixed to the window edge, where a desktop's always-visible scrollbar would cover it
+// The rail is fixed, so it's placed clear of the scroller's scrollbar and of the now playing column on wide screens
 const gutter = ref(0)
 let observer: ResizeObserver | undefined
 
 onMounted(() => {
   const scroller = rail.value?.closest<HTMLElement>('[data-scroller]')
   if (!scroller) return
-  const measure = () => (gutter.value = scroller.offsetWidth - scroller.clientWidth)
+  // Distance from the window's right edge to the scroller's content: its scrollbar, plus any column beside it
+  const measure = () =>
+    (gutter.value =
+      window.innerWidth - scroller.getBoundingClientRect().right + scroller.offsetWidth - scroller.clientWidth)
   observer = new ResizeObserver(measure)
   observer.observe(scroller)
   measure()

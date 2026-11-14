@@ -7,6 +7,7 @@ import SkipIcon from './SkipIcon.vue'
 import Spinner from './Spinner.vue'
 import { useTransport } from './useTransport'
 
+const props = defineProps<{ offline?: boolean }>()
 const emit = defineEmits<{ open: [] }>()
 const { getters, actions } = usePlayerStore()
 
@@ -48,8 +49,9 @@ function onTouchEnd(event: TouchEvent) {
       </button>
       <button
         type="button"
-        class="grid size-11 shrink-0 place-items-center rounded-full active:bg-neutral-700"
+        class="grid size-11 shrink-0 place-items-center rounded-full active:bg-neutral-700 disabled:opacity-40"
         :aria-label="getters.isPlaying.value ? 'Pause' : 'Play'"
+        :disabled="props.offline"
         @click="actions.togglePlay()"
       >
         <Spinner v-if="getters.starting.value" class="size-7" />
@@ -60,7 +62,7 @@ function onTouchEnd(event: TouchEvent) {
         type="button"
         class="grid size-11 shrink-0 place-items-center rounded-full active:bg-neutral-700 disabled:opacity-40"
         aria-label="Forward 30 seconds"
-        :disabled="!getters.status.value?.can_seek"
+        :disabled="props.offline || !getters.status.value?.can_seek"
         @click="next"
       >
         <SkipIcon :seconds="30" forward class="size-7" />
@@ -68,8 +70,9 @@ function onTouchEnd(event: TouchEvent) {
       <button
         v-else-if="mode === 'track' || nextStation"
         type="button"
-        class="grid size-11 shrink-0 place-items-center rounded-full active:bg-neutral-700"
+        class="grid size-11 shrink-0 place-items-center rounded-full active:bg-neutral-700 disabled:opacity-40"
         :aria-label="mode === 'radio' ? `Next station: ${nextStation?.name}` : 'Next track'"
+        :disabled="props.offline"
         @click="next"
       >
         <Icon name="next" class="size-7" />

@@ -74,7 +74,7 @@ watch(query, (q) => {
           spellcheck="false"
           placeholder="Artists, albums, songs"
           aria-label="Search library"
-          class="min-h-12 w-full rounded-xl bg-neutral-800 pr-12 pl-10 text-base outline-none placeholder:text-neutral-500 focus:ring-2 focus:ring-accent [&::-webkit-search-cancel-button]:hidden"
+          class="min-h-12 w-full rounded-xl bg-neutral-800 pr-12 pl-10 text-base outline-none placeholder:text-neutral-400 focus:ring-2 focus:ring-accent [&::-webkit-search-cancel-button]:hidden"
         />
         <button
           v-if="query"
@@ -89,7 +89,7 @@ watch(query, (q) => {
     </header>
 
     <p v-if="error" role="alert" class="px-4 py-6 text-center text-neutral-400">Search failed: {{ error }}</p>
-    <p v-else-if="!results" class="px-4 py-10 text-center text-neutral-500">
+    <p v-else-if="!results" class="px-4 py-10 text-center text-neutral-400">
       {{ loading ? 'Searching…' : 'Find anything in your library' }}
     </p>
     <p

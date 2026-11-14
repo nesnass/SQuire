@@ -3,9 +3,11 @@ import type { IconName } from './Icon.vue'
 
 export interface SheetAction {
   label: string
-  icon: IconName
+  // Choices (a sort order, a role) have no icon; they mark the current one instead
+  icon?: IconName
   run: () => void
   danger?: boolean
+  selected?: boolean
 }
 
 export interface ActionSheetContent {

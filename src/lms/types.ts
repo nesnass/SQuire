@@ -9,6 +9,7 @@ export interface Player {
   connected: number
   power: number
   isplaying: number
+  canpoweroff?: number
   ip?: string
 }
 
@@ -26,6 +27,9 @@ export interface Track {
   title: string
   artist?: string
   album?: string
+  // Library ids as strings; `artist_id` can list several, comma-separated. Streams have neither.
+  artist_id?: string
+  album_id?: string
   duration?: number
   coverid?: string
   artwork_url?: string
@@ -59,6 +63,10 @@ export interface StatusResponse {
   playlist_tracks?: number
   playlist_timestamp?: number
   playlist_loop?: Track[]
+  // Seconds left on the sleep timer; absent when none is set
+  will_sleep_in?: number
+  // 1 while a random mix is running
+  randomplay?: number
 }
 
 export interface Artist {
@@ -88,6 +96,22 @@ export interface LibraryTrack {
   disc?: string | number
   artwork_track_id?: string
   url?: string
+}
+
+export interface Genre {
+  id: number
+  genre: string
+}
+
+export interface GenresResponse {
+  count: number
+  genres_loop?: Genre[]
+  indexList?: LetterIndex
+}
+
+export interface YearsResponse {
+  count: number
+  years_loop?: { year: number }[]
 }
 
 // Leading character and how many items start with it, in list order (from `tags:Z`)
@@ -173,7 +197,11 @@ export interface RadiosResponse {
 export type PlayTarget =
   | { album_id: number }
   | { artist_id: number }
-  | { track_id: number }
+  // A comma-separated list plays several tracks in order
+  | { track_id: number | string }
+  // Everything in a genre and/or year
+  | { genre_id: number; year?: number }
+  | { year: number }
   | { playlist_id: number }
   // Plugin menus (favourites, podcasts, radio) play through `<menu> playlist play item_id:…`
   | { menu: string; item_id: string }

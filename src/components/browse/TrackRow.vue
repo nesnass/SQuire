@@ -27,7 +27,7 @@ const subtitle = computed(() => {
       :aria-current="isCurrent ? 'true' : undefined"
       @click="emit('play')"
     >
-      <span v-if="props.numbered" class="flex w-6 shrink-0 justify-end text-sm tabular-nums text-neutral-500">
+      <span v-if="props.numbered" class="flex w-6 shrink-0 justify-end text-sm tabular-nums text-neutral-400">
         <PlayingBars v-if="isCurrent && getters.isPlaying.value" />
         <template v-else>{{ props.track.tracknum }}</template>
       </span>
@@ -42,7 +42,7 @@ const subtitle = computed(() => {
         <span class="block truncate" :class="isCurrent ? 'text-accent' : ''">{{ props.track.title }}</span>
         <span v-if="subtitle" class="block truncate text-sm text-neutral-400">{{ subtitle }}</span>
       </span>
-      <span class="text-sm tabular-nums text-neutral-500">{{ formatTime(props.track.duration) }}</span>
+      <span class="text-sm tabular-nums text-neutral-400">{{ formatTime(props.track.duration) }}</span>
     </button>
     <button
       type="button"

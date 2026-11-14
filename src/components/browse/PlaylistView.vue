@@ -9,12 +9,13 @@ import {
   removeFromPlaylist,
   renamePlaylist,
 } from '@/lms/library'
+import { occurrenceKeys } from '@/lms/queue'
 import type { LibraryTrack, Playlist } from '@/lms/types'
 import useFavoritesStore from '@/store/useFavoritesStore'
 import Icon from '../Icon.vue'
 import { confirmSheet, namePrompt, playlistsVersion, showToast, type SheetAction } from '../overlays'
 import BackHeader from './BackHeader.vue'
-import EditableTrackList from './EditableTrackList.vue'
+import EditableTrackList, { type EditableRow } from './EditableTrackList.vue'
 import LoadMore from './LoadMore.vue'
 import PlayBar from './PlayBar.vue'
 import TrackRow from './TrackRow.vue'
@@ -63,6 +64,16 @@ function edit(change: (items: LibraryTrack[]) => LibraryTrack[], command: () => 
       tracks.reset()
     })
 }
+
+const editRows = computed<EditableRow[]>(() => {
+  const keys = occurrenceKeys(tracks.items.value.map((t) => t.id))
+  return tracks.items.value.map((t, i) => ({
+    key: keys[i],
+    title: t.title,
+    subtitle: t.artist,
+    art: coverUrl(t.artwork_track_id, 96),
+  }))
+})
 
 function remove(index: number) {
   edit(
@@ -188,7 +199,7 @@ onMounted(() => {
     />
     <div v-else class="h-5" />
 
-    <EditableTrackList v-if="editing" :tracks="tracks.items.value" @remove="remove" @move="move" />
+    <EditableTrackList v-if="editing" :tracks="editRows" @remove="remove" @move="move" />
     <ol v-else>
       <li v-for="(t, i) in tracks.items.value" :key="t.id">
         <TrackRow :track="t" @play="play('load', target, { playIndex: i })" @more="trackActions(t, i)" />

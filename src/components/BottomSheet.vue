@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { openLayer } from './history'
 import { isTopSheet, popSheet, pushSheet } from './sheetStack'
 
 const props = defineProps<{ label: string; full?: boolean }>()
@@ -15,7 +16,11 @@ let dragStart = 0
 let opener: HTMLElement | null = null
 const id = pushSheet()
 
+// Sheets are modal, so one is always the topmost layer while open
+const release = openLayer({ close: () => close(), active: () => true })
+
 function close() {
+  release()
   shown.value = false
 }
 
@@ -50,6 +55,7 @@ onMounted(() => {
   document.addEventListener('keydown', onKey)
 })
 onBeforeUnmount(() => {
+  release()
   popSheet(id)
   document.removeEventListener('keydown', onKey)
   // A sheet opened from this one may already hold focus; only reclaim it if focus was dropped
@@ -101,7 +107,7 @@ onBeforeUnmount(() => {
             <div class="mx-auto mt-2 h-1 w-10 rounded-full bg-neutral-600" aria-hidden="true" />
             <slot name="header" :close="close" />
           </div>
-          <div class="min-h-0 flex-1 overflow-y-auto">
+          <div data-scroller class="min-h-0 flex-1 overflow-y-auto">
             <slot :close="close" />
           </div>
         </section>

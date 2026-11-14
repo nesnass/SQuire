@@ -27,7 +27,7 @@ onMounted(async () => {
     <h1 ref="heading" tabindex="-1" class="px-4 pt-2 text-3xl font-bold outline-none">Find stations</h1>
     <p class="px-4 pt-1 pb-3 text-sm text-neutral-400">Add a station to your Library from its ⋯ menu.</p>
     <p v-if="failed" class="px-4 py-10 text-center text-neutral-400">Couldn't load radio</p>
-    <p v-else-if="!sources" class="px-4 py-10 text-center text-neutral-500">Loading…</p>
+    <p v-else-if="!sources" class="px-4 py-10 text-center text-neutral-400">Loading…</p>
     <ul v-else>
       <li v-for="r in sources" :key="r.menu">
         <button
