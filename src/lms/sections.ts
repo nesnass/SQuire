@@ -26,6 +26,17 @@ export function letterSections(index: LetterIndex | undefined): LetterSection[] 
   return sections
 }
 
+// The index LMS would send, rebuilt from a whole list's index letters (LMS sends none for a fetched-whole list)
+export function indexOf(items: { textkey?: string }[]): LetterIndex {
+  const index: LetterIndex = []
+  for (const { textkey = '' } of items) {
+    const last = index.at(-1)
+    if (last && last[0] === textkey) last[1]++
+    else index.push([textkey, 1])
+  }
+  return index
+}
+
 // Splits the items loaded so far into their sections; without an index everything is one unlabelled group
 export function groupBySection<T>(items: T[], sections: LetterSection[]): SectionGroup<T>[] {
   if (!sections.length) return items.length ? [{ section: null, items }] : []

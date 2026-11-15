@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { groupBySection, letterSections } from './sections'
+import { groupBySection, indexOf, letterSections } from './sections'
 
 describe('letterSections', () => {
   it('folds digits and symbols into # and keeps offsets', () => {
@@ -27,5 +27,15 @@ describe('groupBySection', () => {
   })
   it('returns one unlabelled group without sections', () => {
     expect(groupBySection(['x'], [])).toEqual([{ section: null, items: ['x'] }])
+  })
+})
+
+describe('indexOf', () => {
+  it('counts runs of the same index letter', () => {
+    expect(indexOf([{ textkey: '2' }, { textkey: 'A' }, { textkey: 'A' }, { textkey: 'B' }])).toEqual([
+      ['2', 1],
+      ['A', 2],
+      ['B', 1],
+    ])
   })
 })

@@ -71,8 +71,9 @@ onMounted(() => {
           Show all <span class="sr-only">favourites</span>
         </button>
       </div>
-      <ul v-if="shownFavorites.length" class="grid grid-cols-2 gap-2 px-4 @2xl:grid-cols-3 @4xl:grid-cols-4">
-        <li v-for="f in shownFavorites" :key="f.id"><FavoriteRow :favorite="f" tile /></li>
+      <!-- A shelf like Albums below, so both rows have the same size of cover -->
+      <ul v-if="shownFavorites.length" class="flex snap-x scroll-px-4 gap-4 overflow-x-auto px-4 pb-2">
+        <li v-for="f in shownFavorites" :key="f.id" class="w-36 shrink-0 snap-start"><FavoriteRow :favorite="f" tile /></li>
       </ul>
       <p v-else-if="favorites.getters.loaded.value" class="mx-4 mt-2 flex items-center gap-3 rounded-2xl bg-neutral-900 p-4 text-sm text-neutral-400">
         <Icon name="heartOutline" class="size-6 shrink-0" />

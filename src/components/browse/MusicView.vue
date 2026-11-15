@@ -7,14 +7,16 @@ import {
   fetchAlbums,
   fetchAllArtists,
   fetchDecadeAlbums,
+  fetchGenres,
+  fetchYears,
   fetchArtists,
   type AlbumSort,
 } from '@/lms/library'
-import { groupBySection, letterSections, type LetterSection } from '@/lms/sections'
+import { groupBySection, indexOf, letterSections, type LetterSection } from '@/lms/sections'
 import type { Artist, Genre, PlayTarget } from '@/lms/types'
 import usePlayerStore from '@/store/usePlayerStore'
 import Icon from '../Icon.vue'
-import { actionSheet, showToast, type SheetAction } from '../overlays'
+import { actionSheet, confirmSheet, showToast, type SheetAction } from '../overlays'
 import AlbumTile from './AlbumTile.vue'
 import ArtistRow from './ArtistRow.vue'
 import GenreSheet from './GenreSheet.vue'
@@ -39,9 +41,9 @@ const ROLES: { id: Role; label: string }[] = [
   { id: 'guests', label: 'Other artists' },
 ]
 const MIXES = [
-  { kind: 'tracks', label: 'Random songs' },
-  { kind: 'albums', label: 'Random albums' },
-  { kind: 'contributors', label: 'Random artists' },
+  { kind: 'tracks', label: 'Songs' },
+  { kind: 'albums', label: 'Albums' },
+  { kind: 'contributors', label: 'Artists' },
 ] as const
 
 const { getters, actions } = usePlayerStore()
@@ -49,7 +51,12 @@ const { openActions } = usePlayActions()
 
 const kind = ref<Kind>('albums')
 const sort = ref<AlbumSort>('new')
-const genre = ref<Genre | null>(null)
+const genres = ref<Genre[]>([])
+// A comma-separated list, which LMS reads as any of them
+const genreIds = computed(() => genres.value.map((g) => g.id).join(',') || undefined)
+const genreLabel = computed(() =>
+  genres.value.length > 2 ? `${genres.value.length} genres` : genres.value.map((g) => g.genre).join(', '),
+)
 const period = ref<Period | null>(null)
 const year = computed(() => (period.value && !period.value.decade ? period.value.value : null))
 const periodLabel = computed(() => (period.value ? `${period.value.value}${period.value.decade ? 's' : ''}` : ''))
@@ -61,21 +68,23 @@ const root = ref<HTMLElement | null>(null)
 // The letter index comes with the first page; "Recently added" has no alphabetical order to index
 const albums = usePaged((start, n) =>
   period.value?.decade
-    ? fetchDecadeAlbums(period.value.value, { sort: sort.value, genreId: genre.value?.id })
+    ? fetchDecadeAlbums(period.value.value, { sort: sort.value, genreId: genreIds.value })
     : fetchAlbums(start, n, {
     sort: sort.value,
     withIndex: start === 0 && sort.value !== 'new',
-    genreId: genre.value?.id,
+    genreId: genreIds.value,
     year: year.value ?? undefined,
   }),
 )
 const artists = usePaged(
   async (start, n) =>
-    fetchArtists(start, n, { withIndex: start === 0, genreId: genre.value?.id, roleId: await fetchAlbumArtistRole() }),
+    fetchArtists(start, n, { withIndex: start === 0, genreId: genreIds.value, roleId: await fetchAlbumArtistRole() }),
   200,
 )
 
 const albumSections = computed(() => letterSections(albums.index.value))
+// LMS caps "Recently added" at its own setting (Settings › Interface), so the list may stop short of the library
+const recentCapped = computed(() => sort.value === 'new' && !filtered.value && albums.done.value)
 const albumGroups = computed(() => groupBySection(albums.items.value, albumSections.value))
 const artistSections = computed(() => letterSections(artists.index.value))
 const artistGroups = computed(() => groupBySection(artists.items.value, artistSections.value))
@@ -83,6 +92,14 @@ const artistGroups = computed(() => groupBySection(artists.items.value, artistSe
 // Composers and guests: fetched whole once per role and kept for the session
 const credits = ref<Partial<Record<Role, Artist[]>>>({})
 const creditsError = ref(false)
+const creditSections = computed(() => letterSections(indexOf(role.value === 'main' ? [] : (credits.value[role.value] ?? []))))
+const creditGroups = computed(() =>
+  groupBySection(role.value === 'main' ? [] : (credits.value[role.value] ?? []), creditSections.value),
+)
+// Already loaded whole, so a jump only scrolls
+function jumpCredits(section: LetterSection) {
+  document.getElementById(`credits-${section.start}`)?.scrollIntoView({ block: 'start' })
+}
 async function loadCredits(r: CreditRole) {
   if (credits.value[r]) return
   creditsError.value = false
@@ -97,14 +114,14 @@ async function loadCredits(r: CreditRole) {
   }
 }
 
-const filtered = computed(() => Boolean(genre.value || period.value))
+const filtered = computed(() => Boolean(genres.value.length || period.value))
 // LMS plays one year at a time, so a decade has no play-all
 const filterTarget = computed<PlayTarget | null>(() => {
   if (period.value?.decade) return null
-  if (genre.value) return { genre_id: genre.value.id, ...(year.value ? { year: year.value } : {}) }
+  if (genreIds.value) return { genre_id: genreIds.value, ...(year.value ? { year: year.value } : {}) }
   return year.value ? { year: year.value } : null
 })
-const filterTitle = computed(() => [genre.value?.genre, periodLabel.value].filter(Boolean).join(' · '))
+const filterTitle = computed(() => [genreLabel.value, periodLabel.value].filter(Boolean).join(' · '))
 const sortLabel = computed(() => SORTS.find((s) => s.id === sort.value)?.label)
 const roleLabel = computed(() => ROLES.find((r) => r.id === role.value)?.label)
 const mixOn = computed(() => Boolean(getters.status.value?.randomplay))
@@ -123,8 +140,8 @@ watch(filtered, async (now, before) => {
   }
 })
 
-watch([sort, genre, period], albums.reset)
-watch(genre, () => {
+watch([sort, genres, period], albums.reset)
+watch(genres, () => {
   if (artists.count.value !== null) artists.reset()
 })
 watch([kind, role], ([k, r]) => {
@@ -157,24 +174,87 @@ function chooseRole() {
   }
 }
 
-function startMix(mix: (typeof MIXES)[number]['kind'] | 'disable') {
+// Filters that apply to what's showing: artists lists have no year filter, and credits lists no filters at all
+const activeGenres = computed(() => (kind.value === 'albums' || role.value === 'main' ? genres.value : []))
+const activePeriod = computed(() => (kind.value === 'albums' ? period.value : null))
+const shuffleScope = computed(
+  () => [activeGenres.value.length ? genreLabel.value : '', activePeriod.value ? periodLabel.value : ''].filter(Boolean).join(' · ') ||
+    'your library',
+)
+
+// What to queue for the active filters. LMS takes one year per command, so a decade is one target per year;
+// with no filter, every genre stands in for the whole library
+async function shuffleTargets(): Promise<PlayTarget[]> {
+  const ids = activeGenres.value.length ? genreIds.value : (await fetchGenres()).map((g) => g.id).join(',')
+  const p = activePeriod.value
+  if (!p) return ids ? [{ genre_id: ids }] : []
+  const years = p.decade ? (await fetchYears()).filter((y) => y >= p.value && y < p.value + 10) : [p.value]
+  return years.map((year) => (ids && activeGenres.value.length ? { genre_id: ids, year } : { year }))
+}
+
+// Both replace the queue, so a room with something queued is asked first
+function replacingQueue(what: string, run: () => Promise<void>) {
+  if (!getters.queueTotal.value) return void run()
+  confirmSheet.value = {
+    title: `Replace the queue on ${getters.activeLabel.value}?`,
+    message: `${what}. The ${getters.queueTotal.value} tracks queued now are removed.`,
+    confirmLabel: 'Replace queue',
+    run,
+  }
+}
+
+function reportStart(ok: boolean, message: string) {
+  showToast(ok ? message : 'Pick a room in Rooms first')
+}
+
+function shuffle(by: 'songs' | 'albums') {
+  replacingQueue(`Shuffles ${shuffleScope.value} ${by === 'albums' ? 'album by album' : 'song by song'}`, async () => {
+    try {
+      const targets = await shuffleTargets()
+      if (!targets.length) return showToast('Nothing to shuffle')
+      reportStart(await actions.shuffleAll(targets, by), `Shuffling on ${getters.activeLabel.value}`)
+    } catch {
+      showToast("Couldn't reach the server")
+    }
+  })
+}
+
+// RandomPlay can be limited to genres but not to years
+function startMix(mix: (typeof MIXES)[number]['kind']) {
+  replacingQueue('An endless mix keeps adding random tracks until you stop it', async () => {
+    try {
+      const ok = await actions.randomMix(mix, activeGenres.value.map((g) => g.genre))
+      reportStart(ok, `Endless mix on ${getters.activeLabel.value}`)
+    } catch {
+      showToast("Couldn't reach the server")
+    }
+  })
+}
+
+function stopMix() {
   actions
-    .randomMix(mix)
-    .then((ok) => {
-      if (!ok) showToast('Pick a room in Rooms first')
-      else showToast(mix === 'disable' ? 'Random mix stopped' : `Random mix on ${getters.activeLabel.value}`)
-    })
+    .randomMix('disable')
+    .then((ok) => reportStart(ok, 'Endless mix stopped'))
     .catch(() => showToast("Couldn't reach the server"))
 }
 
 function chooseMix() {
-  const options: SheetAction[] = MIXES.map((m) => ({ label: m.label, icon: 'shuffle', run: () => startMix(m.kind) }))
-  if (mixOn.value) options.unshift({ label: 'Stop random mix', icon: 'close', run: () => startMix('disable') })
+  const scope = activeGenres.value.length ? `from ${genreLabel.value}` : 'from your whole library'
   actionSheet.value = {
-    title: 'Random mix',
-    subtitle: 'Keeps the queue topped up from your library',
-    actions: options,
+    title: 'Endless mix',
+    subtitle: `Keeps adding random tracks ${scope}${activePeriod.value ? ' · year filters don’t apply' : ''}`,
+    actions: MIXES.map((m) => ({ label: m.label, icon: 'shuffle', run: () => startMix(m.kind) })),
   }
+}
+
+function chooseShuffle() {
+  const options: SheetAction[] = [
+    { label: 'Shuffle songs', icon: 'shuffle', run: () => shuffle('songs') },
+    { label: 'Shuffle albums', icon: 'album', run: () => shuffle('albums') },
+  ]
+  if (mixOn.value) options.push({ label: 'Stop endless mix', icon: 'close', run: stopMix })
+  else if (randomAvailable.value) options.push({ label: 'Endless mix…', icon: 'repeat', run: chooseMix })
+  actionSheet.value = { title: `Shuffle ${shuffleScope.value}`, actions: options }
 }
 
 function filterMore() {
@@ -210,34 +290,50 @@ const chipOff = 'border-neutral-700 text-neutral-300'
           {{ k }}
         </button>
       </div>
-      <button v-if="randomAvailable" type="button" :class="[chip, mixOn ? chipOn : chipOff]" @click="chooseMix">
-        <Icon name="shuffle" class="size-4" /> {{ mixOn ? 'Random mix on' : 'Random mix' }}
+      <!-- Shuffles whatever the filters below select; its sheet title names it -->
+      <button type="button" :class="[chip, mixOn ? chipOn : chipOff]" @click="chooseShuffle">
+        <Icon name="shuffle" class="size-4" /> {{ mixOn ? 'Endless mix on' : 'Shuffle' }}
       </button>
     </div>
 
-    <div class="flex gap-2 overflow-x-auto px-4 py-3" role="group" aria-label="Filters">
-      <button v-if="kind === 'albums'" type="button" :class="[chip, chipOff]" @click="chooseSort">
-        <span class="sr-only">Sort by</span>{{ sortLabel }}
-        <Icon name="expandMore" class="size-4" />
+    <!-- Sorting and "show" choices are plain text with their own icon; filters are the pills after the divider -->
+    <div class="flex items-center gap-2 overflow-x-auto px-4 py-3">
+      <button
+        v-if="kind === 'albums'"
+        type="button"
+        class="flex min-h-9 shrink-0 items-center gap-1.5 pr-1 text-sm font-medium text-neutral-200"
+        @click="chooseSort"
+      >
+        <Icon name="sort" class="size-5 text-neutral-400" /><span class="sr-only">Sort by</span>{{ sortLabel }}
+        <Icon name="expandMore" class="size-4 text-neutral-400" />
       </button>
-      <button v-if="kind === 'artists'" type="button" :class="[chip, role === 'main' ? chipOff : chipOn]" @click="chooseRole">
-        <span class="sr-only">Show</span>{{ roleLabel }}
-        <Icon name="expandMore" class="size-4" />
+      <button
+        v-if="kind === 'artists'"
+        type="button"
+        class="flex min-h-9 shrink-0 items-center gap-1.5 pr-1 text-sm font-medium text-neutral-200"
+        @click="chooseRole"
+      >
+        <Icon name="person" class="size-5 text-neutral-400" /><span class="sr-only">Show</span>{{ roleLabel }}
+        <Icon name="expandMore" class="size-4 text-neutral-400" />
       </button>
-      <template v-if="kind === 'albums' || role === 'main'">
-        <span v-if="genre" :class="[chip, chipOn, 'pr-0']">
+      <span
+        v-if="kind === 'albums' || role === 'main'"
+        class="h-6 w-px shrink-0 bg-neutral-700"
+        aria-hidden="true"
+      />
+      <div v-if="kind === 'albums' || role === 'main'" class="flex gap-2" role="group" aria-label="Filters">
+        <span v-if="genres.length" :class="[chip, chipOn, 'pr-0']">
           <button type="button" class="flex items-center gap-1" @click="picking = 'genre'">
-            <span class="sr-only">Genre:</span>{{ genre.genre }}
+            <span class="sr-only">Genre:</span>{{ genreLabel }}
           </button>
-          <button type="button" class="grid size-9 place-items-center" :aria-label="`Clear genre ${genre.genre}`" @click="genre = null">
+          <button type="button" class="grid size-9 place-items-center" :aria-label="`Clear genre ${genreLabel}`" @click="genres = []">
             <Icon name="close" class="size-4" />
           </button>
         </span>
         <button v-else type="button" :class="[chip, chipOff]" @click="picking = 'genre'">
           Genre <Icon name="expandMore" class="size-4" />
         </button>
-      </template>
-      <template v-if="kind === 'albums'">
+        <template v-if="kind === 'albums'">
         <span v-if="period" :class="[chip, chipOn, 'pr-0']">
           <button type="button" class="flex items-center gap-1 tabular-nums" @click="picking = 'year'">
             <span class="sr-only">Year:</span>{{ periodLabel }}
@@ -249,7 +345,8 @@ const chipOff = 'border-neutral-700 text-neutral-300'
         <button v-else type="button" :class="[chip, chipOff]" @click="picking = 'year'">
           Year <Icon name="expandMore" class="size-4" />
         </button>
-      </template>
+        </template>
+      </div>
     </div>
 
     <template v-if="kind === 'albums'">
@@ -282,6 +379,9 @@ const chipOff = 'border-neutral-700 text-neutral-300'
       </section>
       <p v-if="albums.done.value && !albums.items.value.length" class="px-4 py-10 text-center text-neutral-400">
         No albums match
+      </p>
+      <p v-else-if="recentCapped" class="px-4 pb-4 text-center text-sm text-neutral-400">
+        The {{ albums.count.value }} most recently added albums. LMS sets how many in Settings › Interface.
       </p>
       <LoadMore :loading="albums.loading.value" :error="albums.error.value" :done="albums.done.value" @more="albums.more" />
       <LetterRail v-if="albumSections.length > 1" :sections="albumSections" @jump="jump(albums, 'albums', $event)" />
@@ -323,15 +423,29 @@ const chipOff = 'border-neutral-700 text-neutral-300'
       <p v-else-if="!credits[role]" class="px-4 py-10 text-center text-neutral-400">Loading…</p>
       <template v-else>
         <p class="px-4 pb-2 text-sm text-neutral-400">{{ credits[role]?.length }} {{ roleLabel?.toLowerCase() }}</p>
-        <ul>
-          <li v-for="a in credits[role]" :key="a.id">
-            <ArtistRow :artist="a" :role="role" />
-          </li>
-        </ul>
+        <section
+          v-for="g in creditGroups"
+          :key="g.section?.start ?? 'all'"
+          :aria-labelledby="g.section ? `credits-${g.section.start}` : undefined"
+        >
+          <h3
+            v-if="g.section"
+            :id="`credits-${g.section.start}`"
+            class="sticky top-0 z-5 bg-neutral-950/95 px-4 py-1.5 text-sm font-semibold text-accent backdrop-blur"
+          >
+            {{ g.section.letter }}
+          </h3>
+          <ul :class="{ 'pr-6': g.section }">
+            <li v-for="a in g.items" :key="a.id">
+              <ArtistRow :artist="a" :role="role" />
+            </li>
+          </ul>
+        </section>
+        <LetterRail v-if="creditSections.length > 1" :sections="creditSections" @jump="jumpCredits" />
       </template>
     </template>
 
-    <GenreSheet v-if="picking === 'genre'" :selected="genre?.id" @pick="genre = $event" @close="picking = null" />
+    <GenreSheet v-if="picking === 'genre'" :selected="genres" @pick="genres = $event" @close="picking = null" />
     <YearSheet v-if="picking === 'year'" :selected="period" @pick="period = $event" @close="picking = null" />
   </div>
 </template>

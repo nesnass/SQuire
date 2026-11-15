@@ -73,6 +73,7 @@ export interface Artist {
   id: number
   artist: string
   favorites_url?: string
+  textkey?: string
 }
 
 export interface Album {
@@ -199,8 +200,8 @@ export type PlayTarget =
   | { artist_id: number }
   // A comma-separated list plays several tracks in order
   | { track_id: number | string }
-  // Everything in a genre and/or year
-  | { genre_id: number; year?: number }
+  // Everything in some genres (a comma-separated list) and/or a year
+  | { genre_id: number | string; year?: number }
   | { year: number }
   | { playlist_id: number }
   // Plugin menus (favourites, podcasts, radio) play through `<menu> playlist play item_id:…`

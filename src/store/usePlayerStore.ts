@@ -407,12 +407,17 @@ function usePlayerStore() {
 
   type PlayMode = 'load' | 'insert' | 'add'
 
-  async function playItemsNow(cmd: PlayMode, target: PlayTarget, opts: { playIndex?: number; shuffle?: boolean }) {
+  // LMS shuffle modes: 0 off, 1 by song, 2 by album
+  type Shuffle = boolean | 'albums'
+  const shuffleMode = (s: Shuffle) => (s === 'albums' ? 2 : s ? 1 : 0)
+
+  async function playItemsNow(cmd: PlayMode, target: PlayTarget, opts: { playIndex?: number; shuffle?: Shuffle }) {
     const id = commandTarget()
     if (!id) return false
     if (opts.shuffle !== undefined) {
-      patch(memberIds(), { 'playlist shuffle': opts.shuffle ? 1 : 0 })
-      await send(id, ['playlist', 'shuffle', opts.shuffle ? 1 : 0], false)
+      const mode = shuffleMode(opts.shuffle)
+      patch(memberIds(), { 'playlist shuffle': mode })
+      await send(id, ['playlist', 'shuffle', mode], false)
     }
     if (cmd === 'load') patch(memberIds(), { mode: 'play' })
     // Plugin menu items can be streams or feeds rather than library tracks, so their plugin plays them
@@ -586,15 +591,34 @@ function usePlayerStore() {
       return Promise.all(ids.map((id) => send(id, ['power', on ? 1 : 0], false))).then(() => refresh())
     },
     // Random Mix plugin: LMS keeps topping up the queue from the library until it's stopped
-    randomMix(kind: 'tracks' | 'albums' | 'contributors' | 'disable'): Promise<boolean> {
+    // `genres` limits the mix to those genre names; none means every genre. RandomPlay keeps the choice as its
+    // own setting, so this replaces whatever genres were picked for it elsewhere
+    async randomMix(kind: 'tracks' | 'albums' | 'contributors' | 'disable', genres: string[] = []): Promise<boolean> {
       const id = commandTarget()
-      if (!id) return Promise.resolve(false)
+      if (!id) return false
       if (kind === 'disable') {
         patch(memberIds(), { randomplay: 0 })
-        return send(id, ['randomplay', 'disable']).then(() => true)
+        await send(id, ['randomplay', 'disable'])
+        return true
       }
       patch(memberIds(), { randomplay: 1, mode: 'play' })
-      return whileStarting(() => send(id, ['randomplay', kind])).then(() => true)
+      await whileStarting(async () => {
+        await send(id, ['randomplaygenreselectall', genres.length ? 0 : 1], false)
+        for (const genre of genres) await send(id, ['randomplaychoosegenre', genre, 1], false)
+        await send(id, ['randomplay', kind])
+      })
+      return true
+    },
+    // Replaces the queue with every target's tracks, shuffled. Several targets stand in for a filter LMS can't
+    // express in one command, such as a decade (one per year). Returns false when no room is selected
+    shuffleAll(targets: PlayTarget[], by: 'songs' | 'albums'): Promise<boolean> {
+      const [first, ...rest] = targets
+      if (!first) return Promise.resolve(true)
+      return whileStarting(async () => {
+        if (!(await playItemsNow('load', first, { shuffle: by === 'albums' ? 'albums' : true }))) return false
+        for (const t of rest) await playItemsNow('add', t, {})
+        return true
+      })
     },
     async playAll() {
       const ready = rooms.value.filter((r) => r.members[0].connected && r.power && (r.status?.playlist_tracks ?? 0) > 0)

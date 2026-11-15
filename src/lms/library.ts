@@ -56,7 +56,7 @@ export function fetchAlbumArtistRole(): Promise<string> {
 export async function fetchArtists(
   start: number,
   n: number,
-  opts: { search?: string; withIndex?: boolean; genreId?: number; roleId?: string } = {},
+  opts: { search?: string; withIndex?: boolean; genreId?: string; roleId?: string } = {},
 ): Promise<Page<Artist>> {
   const res = await lmsQuery<ArtistsResponse>('', [
     'artists',
@@ -77,7 +77,8 @@ export async function fetchAlbums(
     albumId?: number
     search?: string
     withIndex?: boolean
-    genreId?: number
+    // A comma-separated list matches any of them
+    genreId?: string
     year?: number
     roleId?: string
     compilation?: 0 | 1
@@ -107,7 +108,7 @@ const DECADE_YEAR_MAX = 2000
 
 export async function fetchDecadeAlbums(
   decade: number,
-  opts: { sort: AlbumSort; genreId?: number },
+  opts: { sort: AlbumSort; genreId?: string },
 ): Promise<Page<Album>> {
   const years = (await fetchYears()).filter((y) => y >= decade && y < decade + 10)
   const pages = await Promise.all(
@@ -160,7 +161,8 @@ export async function fetchYears(): Promise<number[]> {
 
 // Every artist with the given roles, in one request; used where the server can't filter for us
 export async function fetchAllArtists(roleId: string): Promise<Artist[]> {
-  const res = await lmsQuery<ArtistsResponse>('', ['artists', 0, 20000, `role_id:${roleId}`])
+  // textkey is each name's index letter, for the letter rail
+  const res = await lmsQuery<ArtistsResponse>('', ['artists', 0, 20000, `role_id:${roleId}`, 'tags:s'])
   return res.artists_loop ?? []
 }
 

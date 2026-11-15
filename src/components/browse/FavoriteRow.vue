@@ -3,11 +3,12 @@ import { computed } from 'vue'
 import { favoriteKind, imageUrl, type FavoriteKind } from '@/lms/format'
 import type { Favorite } from '@/lms/types'
 import Icon, { type IconName } from '../Icon.vue'
+import CoverTile from './CoverTile.vue'
 import { useNav } from './nav'
 import { usePlayActions } from './playActions'
 
 // Items inside a favourites folder are already favourites, so they get no ♥ toggle
-// `tile` is Home's compact grid cell
+// `tile` is the square cover cell used in grids and shelves
 const props = defineProps<{ favorite: Favorite; nested?: boolean; tile?: boolean }>()
 const nav = useNav()
 const { play, openActions } = usePlayActions()
@@ -23,7 +24,7 @@ const KINDS: Record<FavoriteKind, { label: string; icon: IconName }> = {
 }
 
 const kind = computed(() => KINDS[favoriteKind(props.favorite)])
-const art = computed(() => imageUrl(props.favorite.image, 96))
+const art = computed(() => imageUrl(props.favorite.image, props.tile ? 300 : 96))
 const target = computed(() => ({ menu: 'favorites', item_id: props.favorite.id }))
 
 function open() {
@@ -42,11 +43,19 @@ function more() {
 </script>
 
 <template>
-  <div class="flex items-center" :class="{ 'h-full overflow-hidden rounded-xl bg-neutral-900': props.tile }">
+  <CoverTile
+    v-if="props.tile"
+    :covers="art ? [art] : []"
+    :icon="kind.icon"
+    :title="props.favorite.name"
+    :more-label="props.favorite.hasitems ? undefined : `More for ${props.favorite.name}`"
+    @open="open"
+    @more="more"
+  />
+  <div v-else class="flex items-center">
     <button
       type="button"
-      class="flex min-w-0 flex-1 items-center gap-3 text-left"
-      :class="props.tile ? 'min-h-16 self-stretch p-2 active:bg-neutral-800' : 'min-h-14 py-1.5 pl-4 active:bg-neutral-900'"
+      class="flex min-h-14 min-w-0 flex-1 items-center gap-3 py-1.5 pl-4 text-left active:bg-neutral-900"
       @click="open"
     >
       <span class="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-neutral-800 text-neutral-500">
@@ -54,15 +63,14 @@ function more() {
         <Icon v-else :name="kind.icon" class="size-6" />
       </span>
       <span class="min-w-0 flex-1">
-        <span :class="props.tile ? 'line-clamp-2 text-sm leading-snug font-medium' : 'block truncate'">{{ props.favorite.name }}</span>
-        <span v-if="kind.label && !props.tile" class="block truncate text-sm text-neutral-400">{{ kind.label }}</span>
+        <span class="block truncate">{{ props.favorite.name }}</span>
+        <span v-if="kind.label" class="block truncate text-sm text-neutral-400">{{ kind.label }}</span>
       </span>
     </button>
     <button
       v-if="!props.favorite.hasitems"
       type="button"
-      class="flex shrink-0 items-center justify-center text-neutral-400 active:text-neutral-100"
-      :class="props.tile ? 'h-full w-10' : 'size-12'"
+      class="flex size-12 shrink-0 items-center justify-center text-neutral-400 active:text-neutral-100"
       :aria-label="`More for ${props.favorite.name}`"
       @click="more"
     >

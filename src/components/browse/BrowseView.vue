@@ -7,7 +7,7 @@ import { playlistsVersion } from '../overlays'
 import FavoriteRow from './FavoriteRow.vue'
 import LoadMore from './LoadMore.vue'
 import MusicView from './MusicView.vue'
-import PlaylistRow from './PlaylistRow.vue'
+import PlaylistTile from './PlaylistTile.vue'
 import PodcastShelf from './PodcastShelf.vue'
 import { useNav } from './nav'
 import { usePaged } from './usePaged'
@@ -62,19 +62,17 @@ watch(section, (s) => {
     </template>
 
     <template v-else-if="section === 'radio'">
-      <ul class="pt-3">
-        <li v-for="f in favorites.getters.stations.value" :key="f.id"><FavoriteRow :favorite="f" /></li>
+      <!-- Same cells as Podcasts, with the way to add more as the last one -->
+      <ul class="grid grid-cols-2 gap-x-4 gap-y-5 px-4 @md:grid-cols-3 @2xl:grid-cols-4 @4xl:grid-cols-5 @6xl:grid-cols-6 pt-4">
+        <li v-for="f in favorites.getters.stations.value" :key="f.id"><FavoriteRow :favorite="f" tile /></li>
         <li>
-          <button
-            type="button"
-            class="flex min-h-14 w-full items-center gap-3 px-4 py-1.5 text-left text-accent active:bg-neutral-900"
-            @click="nav.push({ kind: 'radioSources' })"
-          >
-            <span class="flex size-12 shrink-0 items-center justify-center rounded-lg border-2 border-dashed border-neutral-700">
-              <Icon name="search" class="size-6" />
+          <button type="button" class="group w-full text-left" @click="nav.push({ kind: 'radioSources' })">
+            <span
+              class="flex aspect-square items-center justify-center rounded-xl border-2 border-dashed border-neutral-700 text-neutral-400 group-active:bg-neutral-900"
+            >
+              <Icon name="search" class="size-10" />
             </span>
-            <span class="flex-1">Find stations</span>
-            <Icon name="back" class="size-5 rotate-180 text-neutral-600" />
+            <span class="mt-2 block text-sm font-medium text-accent">Find stations</span>
           </button>
         </li>
       </ul>
@@ -84,9 +82,9 @@ watch(section, (s) => {
     </template>
 
     <template v-else-if="section === 'playlists'">
-      <ul class="pt-3">
+      <ul class="grid grid-cols-2 gap-x-4 gap-y-5 px-4 @md:grid-cols-3 @2xl:grid-cols-4 @4xl:grid-cols-5 @6xl:grid-cols-6 pt-4">
         <li v-for="p in playlists.items.value" :key="p.id">
-          <PlaylistRow :playlist="p" />
+          <PlaylistTile :playlist="p" />
         </li>
       </ul>
       <p v-if="playlists.done.value && !playlists.items.value.length" class="px-4 py-10 text-center text-neutral-400">
