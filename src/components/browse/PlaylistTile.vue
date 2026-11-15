@@ -13,15 +13,15 @@ const cache = new Map<number, Promise<string[]>>()
 
 // Same as PlaylistView's header: four distinct covers make a mosaic, fewer show the first
 function coversFor(id: number): Promise<string[]> {
-  let covers = cache.get(id)
-  if (!covers) {
-    covers = fetchPlaylistTracks(0, SAMPLE, id).then((page) => {
-      const ids = [...new Set(page.items.map((t) => t.artwork_track_id).filter(Boolean))] as string[]
-      return (ids.length >= 4 ? ids.slice(0, 4) : ids.slice(0, 1)).map((a) => coverUrl(a, 300))
-    })
-    covers.catch(() => cache.delete(id))
-    cache.set(id, covers)
-  }
+  const cached = cache.get(id)
+  if (cached) return cached
+  const covers = fetchPlaylistTracks(0, SAMPLE, id).then((page) => {
+    const ids = [...new Set(page.items.map((t) => t.artwork_track_id).filter(Boolean))] as string[]
+    const urls = ids.map((a) => coverUrl(a, 300)).filter((u): u is string => Boolean(u))
+    return urls.length >= 4 ? urls.slice(0, 4) : urls.slice(0, 1)
+  })
+  covers.catch(() => cache.delete(id))
+  cache.set(id, covers)
   return covers
 }
 
