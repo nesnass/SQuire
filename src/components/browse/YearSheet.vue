@@ -1,13 +1,7 @@
-<script lang="ts">
-export interface Period {
-  decade: boolean
-  value: number
-}
-</script>
-
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { fetchYears } from '@/lms/library'
+import type { Period } from '@/lms/types'
 import BottomSheet from '../BottomSheet.vue'
 
 const props = defineProps<{ selected: Period | null }>()
@@ -39,8 +33,9 @@ async function load() {
   }
 }
 
+// Picking the selected year or decade again clears it, as unticking a genre does
 function pick(period: Period | null, close: () => void) {
-  emit('pick', period)
+  emit('pick', period && isSelected(period.decade, period.value) ? null : period)
   close()
 }
 

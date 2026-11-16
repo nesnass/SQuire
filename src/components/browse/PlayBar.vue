@@ -5,9 +5,16 @@ import Icon from '../Icon.vue'
 import FavoriteButton from './FavoriteButton.vue'
 import { usePlayActions } from './playActions'
 
-const props = defineProps<{ target: PlayTarget; favorite?: FavoriteInput; moreLabel: string }>()
-const emit = defineEmits<{ more: [] }>()
+// Without a target, Play and Shuffle are left to the parent
+const props = defineProps<{ target?: PlayTarget; favorite?: FavoriteInput; moreLabel: string }>()
+const emit = defineEmits<{ play: []; shuffle: []; more: [] }>()
 const { play } = usePlayActions()
+
+function start(shuffle: boolean) {
+  if (props.target) void play('load', props.target, { shuffle })
+  else if (shuffle) emit('shuffle')
+  else emit('play')
+}
 </script>
 
 <template>
@@ -15,14 +22,14 @@ const { play } = usePlayActions()
     <button
       type="button"
       class="flex min-h-12 flex-1 items-center md:max-w-48 justify-center gap-2 rounded-full bg-accent font-semibold text-neutral-950 active:opacity-80"
-      @click="play('load', props.target, { shuffle: false })"
+      @click="start(false)"
     >
       <Icon name="play" class="size-6" /> Play
     </button>
     <button
       type="button"
       class="flex min-h-12 flex-1 items-center md:max-w-48 justify-center gap-2 rounded-full bg-neutral-800 font-semibold active:bg-neutral-700"
-      @click="play('load', props.target, { shuffle: true })"
+      @click="start(true)"
     >
       <Icon name="shuffle" class="size-5" /> Shuffle
     </button>

@@ -7,25 +7,24 @@ import {
   fetchAlbums,
   fetchAllArtists,
   fetchDecadeAlbums,
-  fetchGenres,
-  fetchYears,
   fetchArtists,
+  libraryTarget,
   type AlbumSort,
 } from '@/lms/library'
 import { groupBySection, indexOf, letterSections, type LetterSection } from '@/lms/sections'
-import type { Artist, Genre, PlayTarget } from '@/lms/types'
+import type { Artist, Genre, Period, PlayTarget } from '@/lms/types'
 import usePlayerStore from '@/store/usePlayerStore'
 import Icon from '../Icon.vue'
 import { actionSheet, confirmSheet, showToast, type SheetAction } from '../overlays'
 import AlbumTile from './AlbumTile.vue'
 import ArtistRow from './ArtistRow.vue'
+import FiltersSheet, { type AlbumFilters } from './FiltersSheet.vue'
 import GenreSheet from './GenreSheet.vue'
 import LetterRail from './LetterRail.vue'
 import LoadMore from './LoadMore.vue'
 import PlayBar from './PlayBar.vue'
 import { usePlayActions } from './playActions'
 import { usePaged } from './usePaged'
-import YearSheet, { type Period } from './YearSheet.vue'
 
 type Kind = 'albums' | 'artists'
 type Role = 'main' | CreditRole
@@ -60,20 +59,24 @@ const genreLabel = computed(() =>
 const period = ref<Period | null>(null)
 const year = computed(() => (period.value && !period.value.decade ? period.value.value : null))
 const periodLabel = computed(() => (period.value ? `${period.value.value}${period.value.decade ? 's' : ''}` : ''))
+const compilations = ref(false)
 const role = ref<Role>('main')
-const picking = ref<'genre' | 'year' | null>(null)
+// Albums filter in one sheet; artists have only genres, so theirs opens directly
+const picking = ref<'filters' | 'genre' | null>(null)
 const randomAvailable = ref(false)
 const root = ref<HTMLElement | null>(null)
 
 // The letter index comes with the first page; "Recently added" has no alphabetical order to index
+const compilation = computed(() => (compilations.value ? (1 as const) : undefined))
 const albums = usePaged((start, n) =>
   period.value?.decade
-    ? fetchDecadeAlbums(period.value.value, { sort: sort.value, genreId: genreIds.value })
+    ? fetchDecadeAlbums(period.value.value, { sort: sort.value, genreId: genreIds.value, compilation: compilation.value })
     : fetchAlbums(start, n, {
     sort: sort.value,
     withIndex: start === 0 && sort.value !== 'new',
     genreId: genreIds.value,
     year: year.value ?? undefined,
+    compilation: compilation.value,
   }),
 )
 const artists = usePaged(
@@ -114,14 +117,13 @@ async function loadCredits(r: CreditRole) {
   }
 }
 
-const filtered = computed(() => Boolean(genres.value.length || period.value))
-// LMS plays one year at a time, so a decade has no play-all
-const filterTarget = computed<PlayTarget | null>(() => {
-  if (period.value?.decade) return null
-  if (genreIds.value) return { genre_id: genreIds.value, ...(year.value ? { year: year.value } : {}) }
-  return year.value ? { year: year.value } : null
-})
-const filterTitle = computed(() => [genreLabel.value, periodLabel.value].filter(Boolean).join(' · '))
+const filtered = computed(() => Boolean(genres.value.length || period.value || compilations.value))
+const albumFilters = computed<AlbumFilters>(() => ({ genres: genres.value, period: period.value, compilations: compilations.value }))
+function applyFilters(f: AlbumFilters) {
+  genres.value = f.genres
+  period.value = f.period
+  compilations.value = f.compilations
+}
 const sortLabel = computed(() => SORTS.find((s) => s.id === sort.value)?.label)
 const roleLabel = computed(() => ROLES.find((r) => r.id === role.value)?.label)
 const mixOn = computed(() => Boolean(getters.status.value?.randomplay))
@@ -140,7 +142,7 @@ watch(filtered, async (now, before) => {
   }
 })
 
-watch([sort, genres, period], albums.reset)
+watch([sort, genres, period, compilations], albums.reset)
 watch(genres, () => {
   if (artists.count.value !== null) artists.reset()
 })
@@ -174,25 +176,26 @@ function chooseRole() {
   }
 }
 
-// Filters that apply to what's showing: artists lists have no year filter, and credits lists no filters at all
+// Filters that apply to what's showing: artists lists have only genres, and credits lists no filters at all
 const activeGenres = computed(() => (kind.value === 'albums' || role.value === 'main' ? genres.value : []))
-const activePeriod = computed(() => (kind.value === 'albums' ? period.value : null))
-const shuffleScope = computed(
-  () => [activeGenres.value.length ? genreLabel.value : '', activePeriod.value ? periodLabel.value : ''].filter(Boolean).join(' · ') ||
-    'your library',
+const activeLabel = computed(() =>
+  [
+    activeGenres.value.length ? genreLabel.value : '',
+    kind.value === 'albums' ? periodLabel.value : '',
+    kind.value === 'albums' && compilations.value ? 'Compilations' : '',
+  ]
+    .filter(Boolean)
+    .join(' · '),
 )
-
-// What to queue for the active filters. LMS takes one year per command, so a decade is one target per year;
-// with no filter, every genre stands in for the whole library
-async function shuffleTargets(): Promise<PlayTarget[]> {
-  const ids = activeGenres.value.length ? genreIds.value : (await fetchGenres()).map((g) => g.id).join(',')
-  const p = activePeriod.value
-  if (!p) return ids ? [{ genre_id: ids }] : []
-  const years = p.decade ? (await fetchYears()).filter((y) => y >= p.value && y < p.value + 10) : [p.value]
-  return years.map((year) => (ids && activeGenres.value.length ? { genre_id: ids, year } : { year }))
+const activeCount = computed(
+  () => activeGenres.value.length + (kind.value === 'albums' ? Number(Boolean(period.value)) + Number(compilations.value) : 0),
+)
+function clearFilters() {
+  if (kind.value === 'albums') applyFilters({ genres: [], period: null, compilations: false })
+  else genres.value = []
 }
 
-// Both replace the queue, so a room with something queued is asked first
+// Replacing the queue with a whole slice of the library, so a room with something queued is asked first
 function replacingQueue(what: string, run: () => Promise<void>) {
   if (!getters.queueTotal.value) return void run()
   confirmSheet.value = {
@@ -207,19 +210,39 @@ function reportStart(ok: boolean, message: string) {
   showToast(ok ? message : 'Pick a room in Rooms first')
 }
 
-function shuffle(by: 'songs' | 'albums') {
-  replacingQueue(`Shuffles ${shuffleScope.value} ${by === 'albums' ? 'album by album' : 'song by song'}`, async () => {
-    try {
-      const targets = await shuffleTargets()
-      if (!targets.length) return showToast('Nothing to shuffle')
-      reportStart(await actions.shuffleAll(targets, by), `Shuffling on ${getters.activeLabel.value}`)
-    } catch {
-      showToast("Couldn't reach the server")
-    }
-  })
+async function withLibraryTarget(run: (target: PlayTarget) => Promise<void> | void) {
+  try {
+    const target = await libraryTarget({ genreId: genreIds.value, period: period.value, compilations: compilations.value })
+    if (!target) return showToast('Nothing to play')
+    await run(target)
+  } catch {
+    showToast("Couldn't reach the server")
+  }
 }
 
-// RandomPlay can be limited to genres but not to years
+// Plays what the album grid shows, or the whole library when nothing filters it
+function playLibrary(shuffle: boolean | 'albums') {
+  const scope = activeLabel.value || 'your library'
+  const how = shuffle === 'albums' ? 'Shuffles ' + scope + ' album by album' : shuffle ? `Shuffles ${scope} song by song` : `Plays ${scope}`
+  replacingQueue(how, () =>
+    withLibraryTarget(async (target) => {
+      const ok = await actions.playItems('load', target, { shuffle })
+      reportStart(ok, `${shuffle ? 'Shuffling' : 'Playing'} on ${getters.activeLabel.value}`)
+    }),
+  )
+}
+
+function libraryMore() {
+  void withLibraryTarget((target) =>
+    openActions(
+      target,
+      { title: activeLabel.value || 'Your library' },
+      { extra: [{ label: 'Shuffle albums', icon: 'album', run: () => playLibrary('albums') }] },
+    ),
+  )
+}
+
+// RandomPlay can be limited to genres but not to years or compilations
 function startMix(mix: (typeof MIXES)[number]['kind']) {
   replacingQueue('An endless mix keeps adding random tracks until you stop it', async () => {
     try {
@@ -239,27 +262,17 @@ function stopMix() {
 }
 
 function chooseMix() {
+  if (mixOn.value) {
+    actionSheet.value = { title: 'Endless mix', actions: [{ label: 'Stop endless mix', icon: 'close', run: stopMix }] }
+    return
+  }
   const scope = activeGenres.value.length ? `from ${genreLabel.value}` : 'from your whole library'
+  const ignored = kind.value === 'albums' && (period.value || compilations.value) ? ' · only genre filters apply' : ''
   actionSheet.value = {
     title: 'Endless mix',
-    subtitle: `Keeps adding random tracks ${scope}${activePeriod.value ? ' · year filters don’t apply' : ''}`,
+    subtitle: `Keeps adding random tracks ${scope}${ignored}`,
     actions: MIXES.map((m) => ({ label: m.label, icon: 'shuffle', run: () => startMix(m.kind) })),
   }
-}
-
-function chooseShuffle() {
-  const options: SheetAction[] = [
-    { label: 'Shuffle songs', icon: 'shuffle', run: () => shuffle('songs') },
-    { label: 'Shuffle albums', icon: 'album', run: () => shuffle('albums') },
-  ]
-  if (mixOn.value) options.push({ label: 'Stop endless mix', icon: 'close', run: stopMix })
-  else if (randomAvailable.value) options.push({ label: 'Endless mix…', icon: 'repeat', run: chooseMix })
-  actionSheet.value = { title: `Shuffle ${shuffleScope.value}`, actions: options }
-}
-
-function filterMore() {
-  const target = filterTarget.value
-  if (target) openActions(target, { title: filterTitle.value })
 }
 
 onMounted(() => {
@@ -290,13 +303,12 @@ const chipOff = 'border-neutral-700 text-neutral-300'
           {{ k }}
         </button>
       </div>
-      <!-- Shuffles whatever the filters below select; its sheet title names it -->
-      <button type="button" :class="[chip, mixOn ? chipOn : chipOff]" @click="chooseShuffle">
-        <Icon name="shuffle" class="size-4" /> {{ mixOn ? 'Endless mix on' : 'Shuffle' }}
+      <button v-if="randomAvailable || mixOn" type="button" :class="[chip, mixOn ? chipOn : chipOff]" @click="chooseMix">
+        <Icon name="repeat" class="size-4" /> {{ mixOn ? 'Endless mix on' : 'Endless mix' }}
       </button>
     </div>
 
-    <!-- Sorting and "show" choices are plain text with their own icon; filters are the pills after the divider -->
+    <!-- Sorting and "show" choices are plain text with their own icon; the filters button follows the divider -->
     <div class="flex items-center gap-2 overflow-x-auto px-4 py-3">
       <button
         v-if="kind === 'albums'"
@@ -321,41 +333,34 @@ const chipOff = 'border-neutral-700 text-neutral-300'
         class="h-6 w-px shrink-0 bg-neutral-700"
         aria-hidden="true"
       />
-      <div v-if="kind === 'albums' || role === 'main'" class="flex gap-2" role="group" aria-label="Filters">
-        <span v-if="genres.length" :class="[chip, chipOn, 'pr-0']">
-          <button type="button" class="flex items-center gap-1" @click="picking = 'genre'">
-            <span class="sr-only">Genre:</span>{{ genreLabel }}
-          </button>
-          <button type="button" class="grid size-9 place-items-center" :aria-label="`Clear genre ${genreLabel}`" @click="genres = []">
-            <Icon name="close" class="size-4" />
-          </button>
-        </span>
-        <button v-else type="button" :class="[chip, chipOff]" @click="picking = 'genre'">
-          Genre <Icon name="expandMore" class="size-4" />
-        </button>
-        <template v-if="kind === 'albums'">
-        <span v-if="period" :class="[chip, chipOn, 'pr-0']">
-          <button type="button" class="flex items-center gap-1 tabular-nums" @click="picking = 'year'">
-            <span class="sr-only">Year:</span>{{ periodLabel }}
-          </button>
-          <button type="button" class="grid size-9 place-items-center" :aria-label="`Clear year ${periodLabel}`" @click="period = null">
-            <Icon name="close" class="size-4" />
-          </button>
-        </span>
-        <button v-else type="button" :class="[chip, chipOff]" @click="picking = 'year'">
-          Year <Icon name="expandMore" class="size-4" />
-        </button>
-        </template>
-      </div>
+      <button
+        v-if="kind === 'albums' || role === 'main'"
+        type="button"
+        :class="[chip, activeCount ? chipOn : chipOff]"
+        @click="picking = kind === 'albums' ? 'filters' : 'genre'"
+      >
+        <Icon name="filter" class="size-4" /> {{ kind === 'albums' ? 'Filters' : 'Genre' }}
+        <span v-if="activeCount" class="tabular-nums">· {{ activeCount }}<span class="sr-only"> on</span></span>
+      </button>
     </div>
 
     <template v-if="kind === 'albums'">
-      <template v-if="filtered">
-        <PlayBar v-if="filterTarget" :target="filterTarget" :more-label="`More for ${filterTitle}`" @more="filterMore" />
-        <p v-if="albums.count.value !== null" class="px-4 pb-3 text-sm text-neutral-400">
-          {{ albums.count.value }} {{ albums.count.value === 1 ? 'album' : 'albums' }}
+      <PlayBar
+        :more-label="`More for ${activeLabel || 'your library'}`"
+        @play="playLibrary(false)"
+        @shuffle="playLibrary(true)"
+        @more="libraryMore"
+      />
+      <!-- Filters live in a sheet, so what they narrow the list to is spelled out here -->
+      <div v-if="filtered" class="flex items-center gap-2 pb-2 pl-4 pr-2 text-sm text-neutral-400">
+        <p class="min-w-0 flex-1 truncate">
+          <span class="text-neutral-200">{{ activeLabel }}</span>
+          <template v-if="albums.count.value !== null"> · {{ albums.count.value }} {{ albums.count.value === 1 ? 'album' : 'albums' }}</template>
         </p>
-      </template>
+        <button type="button" class="min-h-11 shrink-0 rounded-full px-3 font-medium text-neutral-300 active:bg-neutral-800" @click="clearFilters">
+          Clear
+        </button>
+      </div>
       <section
         v-for="g in albumGroups"
         :key="g.section?.start ?? 'all'"
@@ -388,7 +393,16 @@ const chipOff = 'border-neutral-700 text-neutral-300'
     </template>
 
     <template v-else-if="role === 'main'">
-      <p v-if="artists.count.value !== null" class="px-4 pb-2 text-sm text-neutral-400">
+      <div v-if="activeLabel" class="flex items-center gap-2 pb-2 pl-4 pr-2 text-sm text-neutral-400">
+        <p class="min-w-0 flex-1 truncate">
+          <span class="text-neutral-200">{{ activeLabel }}</span>
+          <template v-if="artists.count.value !== null"> · {{ artists.count.value }} artists</template>
+        </p>
+        <button type="button" class="min-h-11 shrink-0 rounded-full px-3 font-medium text-neutral-300 active:bg-neutral-800" @click="clearFilters">
+          Clear
+        </button>
+      </div>
+      <p v-else-if="artists.count.value !== null" class="px-4 pb-2 text-sm text-neutral-400">
         {{ artists.count.value }} artists
       </p>
       <section
@@ -445,7 +459,7 @@ const chipOff = 'border-neutral-700 text-neutral-300'
       </template>
     </template>
 
+    <FiltersSheet v-if="picking === 'filters'" :selected="albumFilters" @pick="applyFilters" @close="picking = null" />
     <GenreSheet v-if="picking === 'genre'" :selected="genres" @pick="genres = $event" @close="picking = null" />
-    <YearSheet v-if="picking === 'year'" :selected="period" @pick="period = $event" @close="picking = null" />
   </div>
 </template>

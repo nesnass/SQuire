@@ -10,9 +10,11 @@ import type {
   GenresResponse,
   LetterIndex,
   LibraryTrack,
+  Period,
   Playlist,
   PlaylistsResponse,
   PlaylistTracksResponse,
+  PlayTarget,
   TitlesResponse,
   YearsResponse,
 } from './types'
@@ -103,19 +105,44 @@ export async function fetchAlbums(
   return { items: res.albums_loop ?? [], count: res.count, index: res.indexList }
 }
 
-// LMS filters albums by one year only, so a decade is its years fetched whole and merged
-const DECADE_YEAR_MAX = 2000
+// More albums than one year, or one filtered grid, is expected to hold
+const WHOLE_LIST = 10000
 
+// LMS filters albums by one year only, so a decade is its years fetched whole and merged
 export async function fetchDecadeAlbums(
   decade: number,
-  opts: { sort: AlbumSort; genreId?: string },
+  opts: { sort: AlbumSort; genreId?: string; compilation?: 1 },
 ): Promise<Page<Album>> {
   const years = (await fetchYears()).filter((y) => y >= decade && y < decade + 10)
   const pages = await Promise.all(
-    years.map((year) => fetchAlbums(0, DECADE_YEAR_MAX, { sort: opts.sort, genreId: opts.genreId, year })),
+    years.map((year) => fetchAlbums(0, WHOLE_LIST, { ...opts, year })),
   )
   const items = sortAlbums(pages.flatMap((p) => p.items), opts.sort)
   return { items, count: items.length }
+}
+
+// What the album grid is narrowed to; each part left out matches everything
+export interface AlbumFilter {
+  // A comma-separated list matches any of them
+  genreId?: string
+  period: Period | null
+  compilations: boolean
+}
+
+// The tracks behind an album grid as one playlistcontrol target. playlistcontrol matches a year on tracks
+// rather than albums and has no compilation filter, so those play the grid's albums by id
+export async function libraryTarget(f: AlbumFilter): Promise<PlayTarget | null> {
+  if (f.period || f.compilations) {
+    const opts = { sort: 'album' as const, genreId: f.genreId, compilation: f.compilations ? (1 as const) : undefined }
+    const page = f.period?.decade
+      ? await fetchDecadeAlbums(f.period.value, opts)
+      : await fetchAlbums(0, WHOLE_LIST, { ...opts, year: f.period?.value })
+    if (!page.items.length) return null
+    return { album_id: page.items.map((a) => a.id).join(','), ...(f.genreId ? { genre_id: f.genreId } : {}) }
+  }
+  // Every genre stands in for the whole library
+  const genreId = f.genreId ?? (await fetchGenres()).map((g) => g.id).join(',')
+  return genreId ? { genre_id: genreId } : null
 }
 
 // "Recently added" has no timestamp to merge on, so the newest years come first instead

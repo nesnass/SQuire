@@ -195,14 +195,20 @@ export interface RadiosResponse {
   radioss_loop?: { cmd: string; name: string; icon?: string; type: string; weight?: number }[]
 }
 
+// One year, or a whole decade
+export interface Period {
+  decade: boolean
+  value: number
+}
+
 export type PlayTarget =
-  | { album_id: number }
+  // A comma-separated list plays several albums; a genre narrows them to its tracks
+  | { album_id: number | string; genre_id?: number | string }
   | { artist_id: number }
   // A comma-separated list plays several tracks in order
   | { track_id: number | string }
-  // Everything in some genres (a comma-separated list) and/or a year
-  | { genre_id: number | string; year?: number }
-  | { year: number }
+  // Everything in some genres (a comma-separated list)
+  | { genre_id: number | string }
   | { playlist_id: number }
   // Plugin menus (favourites, podcasts, radio) play through `<menu> playlist play item_id:…`
   | { menu: string; item_id: string }

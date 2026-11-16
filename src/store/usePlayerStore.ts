@@ -611,15 +611,6 @@ function usePlayerStore() {
     },
     // Replaces the queue with every target's tracks, shuffled. Several targets stand in for a filter LMS can't
     // express in one command, such as a decade (one per year). Returns false when no room is selected
-    shuffleAll(targets: PlayTarget[], by: 'songs' | 'albums'): Promise<boolean> {
-      const [first, ...rest] = targets
-      if (!first) return Promise.resolve(true)
-      return whileStarting(async () => {
-        if (!(await playItemsNow('load', first, { shuffle: by === 'albums' ? 'albums' : true }))) return false
-        for (const t of rest) await playItemsNow('add', t, {})
-        return true
-      })
-    },
     async playAll() {
       const ready = rooms.value.filter((r) => r.members[0].connected && r.power && (r.status?.playlist_tracks ?? 0) > 0)
       for (const r of ready) patch(memberIds(r.id), { mode: 'play' })
@@ -630,7 +621,7 @@ function usePlayerStore() {
     playItems(
       cmd: PlayMode,
       target: PlayTarget,
-      opts: { playIndex?: number; shuffle?: boolean } = {},
+      opts: { playIndex?: number; shuffle?: Shuffle } = {},
     ): Promise<boolean> {
       // Only load starts something new; queueing returns as soon as LMS has the list
       return cmd === 'load' ? whileStarting(() => playItemsNow(cmd, target, opts)) : playItemsNow(cmd, target, opts)
