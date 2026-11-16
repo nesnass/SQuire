@@ -35,7 +35,7 @@ const review = ref<string | null>(null)
 
 onMounted(async () => {
   tracks.reset()
-  heading.value?.focus()
+  heading.value?.focus({ preventScroll: true })
   fetchAlbumReview(props.album.id)
     .then((text) => (review.value = text))
     .catch(() => undefined)

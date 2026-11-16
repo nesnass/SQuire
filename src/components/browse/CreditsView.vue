@@ -32,7 +32,7 @@ const roleLabel = computed(() => (props.role === 'composers' ? 'Composer' : 'On 
 
 onMounted(() => {
   tracks.reset()
-  heading.value?.focus()
+  heading.value?.focus({ preventScroll: true })
 })
 </script>
 

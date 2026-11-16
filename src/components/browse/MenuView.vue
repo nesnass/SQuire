@@ -51,7 +51,7 @@ async function more(item: MenuItem) {
 
 onMounted(() => {
   items.reset()
-  heading.value?.focus()
+  heading.value?.focus({ preventScroll: true })
 })
 </script>
 

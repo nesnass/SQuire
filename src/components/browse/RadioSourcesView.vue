@@ -12,7 +12,7 @@ const sources = ref<RadioSource[] | null>(null)
 const failed = ref(false)
 
 onMounted(async () => {
-  heading.value?.focus()
+  heading.value?.focus({ preventScroll: true })
   try {
     sources.value = await fetchRadioSources()
   } catch {

@@ -43,7 +43,7 @@ function unsubscribe() {
 
 onMounted(() => {
   episodes.reset()
-  heading.value?.focus()
+  heading.value?.focus({ preventScroll: true })
 })
 </script>
 

@@ -157,7 +157,7 @@ function playlistActions() {
 
 onMounted(() => {
   tracks.reset()
-  heading.value?.focus()
+  heading.value?.focus({ preventScroll: true })
 })
 </script>
 

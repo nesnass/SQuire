@@ -58,7 +58,7 @@ async function loadAbout() {
 onMounted(() => {
   void load()
   void loadAbout()
-  heading.value?.focus()
+  heading.value?.focus({ preventScroll: true })
 })
 </script>
 

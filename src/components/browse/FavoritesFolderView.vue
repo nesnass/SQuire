@@ -13,7 +13,7 @@ const items = usePaged((start, n) => fetchFavorites(start, n, props.id || undefi
 
 onMounted(() => {
   items.reset()
-  heading.value?.focus()
+  heading.value?.focus({ preventScroll: true })
 })
 </script>
 

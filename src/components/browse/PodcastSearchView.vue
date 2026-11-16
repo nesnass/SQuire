@@ -69,7 +69,7 @@ function open(show: DirectoryShow) {
   if (subscribed) nav.push({ kind: 'podcast', show: subscribed })
 }
 
-onMounted(() => input.value?.focus())
+onMounted(() => input.value?.focus({ preventScroll: true }))
 </script>
 
 <template>
