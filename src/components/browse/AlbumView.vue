@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { coverUrl, groupByDisc, totalLength } from '@/lms/format'
+import { fetchAlbumReview } from '@/lms/info'
 import { fetchAlbums, fetchTracks } from '@/lms/library'
 import type { Album, LibraryTrack } from '@/lms/types'
+import AboutSection from './AboutSection.vue'
 import BackHeader from './BackHeader.vue'
 import LoadMore from './LoadMore.vue'
 import PlayBar from './PlayBar.vue'
@@ -28,9 +30,15 @@ const meta = computed(() =>
     .join(' · '),
 )
 
+// Looked up online by a plugin; left out when not found
+const review = ref<string | null>(null)
+
 onMounted(async () => {
   tracks.reset()
   heading.value?.focus()
+  fetchAlbumReview(props.album.id)
+    .then((text) => (review.value = text))
+    .catch(() => undefined)
   if (!album.value.artist) {
     const res = await fetchAlbums(0, 1, { albumId: props.album.id }).catch(() => null)
     if (res?.items[0]) album.value = res.items[0]
@@ -93,5 +101,7 @@ function albumActions() {
       </ol>
     </section>
     <LoadMore :loading="tracks.loading.value" :error="tracks.error.value" :done="tracks.done.value" @more="tracks.more" />
+
+    <AboutSection v-if="review" class="pt-6" heading="About this album" :title="album.album" :text="review" />
   </article>
 </template>

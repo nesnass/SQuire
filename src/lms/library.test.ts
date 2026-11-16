@@ -17,4 +17,8 @@ describe('sortAlbums', () => {
   it('puts the newest years first for recently added', () => {
     expect(sortAlbums(albums, 'new').map((a) => a.id)).toEqual([2, 3, 1])
   })
+  it('keeps the given order for play history sorts', () => {
+    expect(sortAlbums(albums, 'popular').map((a) => a.id)).toEqual([1, 2, 3])
+    expect(sortAlbums(albums, 'recentlyplayed').map((a) => a.id)).toEqual([1, 2, 3])
+  })
 })

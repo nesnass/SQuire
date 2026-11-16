@@ -25,8 +25,11 @@ export interface Page<T> {
   index?: LetterIndex
 }
 
-// LMS's own sort names; 'artistalbum' is artist, then album title
-export type AlbumSort = 'new' | 'album' | 'artistalbum'
+// LMS's own sort names; 'artistalbum' is artist, then album title, and 'popular' is most played
+export type AlbumSort = 'new' | 'album' | 'artistalbum' | 'popular' | 'recentlyplayed'
+
+// Sorted by play history: LMS lists only albums that have been played, up to its browse limit, and keeps the history to itself
+export const PLAYED_SORTS: readonly AlbumSort[] = ['popular', 'recentlyplayed']
 
 const ALBUM_TAGS = 'tags:ljaSy'
 const TRACK_TAGS = 'tags:tdaliJeu'
@@ -74,7 +77,7 @@ export async function fetchAlbums(
   start: number,
   n: number,
   opts: {
-    sort?: AlbumSort | 'yearalbum' | 'recentlyplayed'
+    sort?: AlbumSort | 'yearalbum'
     artistId?: number
     albumId?: number
     search?: string
@@ -113,6 +116,12 @@ export async function fetchDecadeAlbums(
   decade: number,
   opts: { sort: AlbumSort; genreId?: string; compilation?: 1 },
 ): Promise<Page<Album>> {
+  const inDecade = (a: Album) => (a.year ?? 0) >= decade && (a.year ?? 0) < decade + 10
+  // Play history can't be merged across years, so the decade is taken from LMS's ordered (and capped) played list
+  if (PLAYED_SORTS.includes(opts.sort)) {
+    const items = (await fetchAlbums(0, WHOLE_LIST, opts)).items.filter(inDecade)
+    return { items, count: items.length }
+  }
   const years = (await fetchYears()).filter((y) => y >= decade && y < decade + 10)
   const pages = await Promise.all(
     years.map((year) => fetchAlbums(0, WHOLE_LIST, { ...opts, year })),
@@ -145,8 +154,10 @@ export async function libraryTarget(f: AlbumFilter): Promise<PlayTarget | null> 
   return genreId ? { genre_id: genreId } : null
 }
 
-// "Recently added" has no timestamp to merge on, so the newest years come first instead
+// "Recently added" has no timestamp to merge on, so the newest years come first instead.
+// Play history isn't sent at all, so played sorts keep the order given
 export function sortAlbums(albums: Album[], sort: AlbumSort): Album[] {
+  if (PLAYED_SORTS.includes(sort)) return albums
   const by = (a: string | undefined, b: string | undefined) => (a ?? '').localeCompare(b ?? '', undefined, { sensitivity: 'base' })
   return [...albums].sort((a, b) => {
     if (sort === 'album') return by(a.album, b.album)

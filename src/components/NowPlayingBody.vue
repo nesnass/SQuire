@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import usePlayerStore from '@/store/usePlayerStore'
 import { artworkUrl, formatTime, qualityLabel } from '@/lms/format'
+import { fetchLyrics } from '@/lms/info'
 import Icon from './Icon.vue'
 import RoomVolume from './RoomVolume.vue'
 import SkipIcon from './SkipIcon.vue'
@@ -109,6 +110,24 @@ const { mode, station, previousStation, nextStation, previous, next } = useTrans
 const canSeek = computed(() => Boolean(getters.status.value?.can_seek))
 const repeatLabel = computed(() => ['Repeat off', 'Repeating track', 'Repeating queue'][repeat.value])
 
+// Lyrics take the cover's place: a tap on the cover on a phone, where the controls need their room, or the
+// Lyrics button on wider screens, where a tap on the cover opens cover view. Undefined while looking them up
+const lyrics = ref<string | null | undefined>(null)
+const showLyrics = ref(false)
+watch(
+  () => track.value?.id,
+  async (id) => {
+    lyrics.value = null
+    // Library tracks only; streams carry negative ids
+    if (!id || id < 0 || mode.value === 'radio') return void (showLyrics.value = false)
+    lyrics.value = undefined
+    const text = await fetchLyrics(id).catch(() => null)
+    if (track.value?.id === id) lyrics.value = text
+  },
+  { immediate: true },
+)
+const lyricsText = computed(() => lyrics.value ?? (lyrics.value === undefined ? 'Looking for lyrics…' : 'No lyrics found for this song'))
+
 const { favoriteAction } = usePlayActions()
 
 // Only library tracks carry ids; streams show plain text
@@ -161,17 +180,20 @@ function onSeek(event: Event) {
   dragPosition.value = null
 }
 
-// Horizontal swipe on the artwork skips; the buttons below remain the primary control
-let touchStartX: number | null = null
+// Horizontal swipe on the artwork skips; the buttons below remain the primary control.
+// Mostly vertical moves are scrolling the lyrics, so they never skip
+let touchStart: { x: number; y: number } | null = null
 function onTouchStart(event: TouchEvent) {
-  touchStartX = event.touches[0].clientX
+  touchStart = { x: event.touches[0].clientX, y: event.touches[0].clientY }
 }
 function onTouchEnd(event: TouchEvent) {
-  if (touchStartX === null) return
-  const dx = event.changedTouches[0].clientX - touchStartX
+  if (!touchStart) return
+  const dx = event.changedTouches[0].clientX - touchStart.x
+  const dy = event.changedTouches[0].clientY - touchStart.y
+  touchStart = null
+  if (Math.abs(dx) < Math.abs(dy) * 2) return
   if (dx < -SWIPE_PX) next()
   else if (dx > SWIPE_PX) previous()
-  touchStartX = null
 }
 </script>
 
@@ -209,21 +231,47 @@ function onTouchEnd(event: TouchEvent) {
       :class="{ 'opacity-60': getters.reachable.value === false }"
     >
       <div
-        class="mx-auto aspect-square w-full max-w-[min(100%,42dvh)] overflow-hidden rounded-2xl bg-neutral-800 shadow-2xl"
+        class="relative mx-auto aspect-square w-full max-w-[min(100%,42dvh)] overflow-hidden rounded-2xl bg-neutral-800 shadow-2xl"
         @touchstart.passive="onTouchStart"
         @touchend="onTouchEnd"
       >
-        <!-- On wide screens the cover opens cover view; on a phone it's a swipe surface only -->
-        <button
-          v-if="art"
-          type="button"
-          class="hidden size-full md:block md:cursor-zoom-in"
-          aria-label="Show cover full screen"
-          @click="enterCoverView"
-        >
-          <img :src="art" alt="" class="size-full object-cover" draggable="false" />
-        </button>
-        <img v-if="art" :src="art" alt="" class="size-full object-cover md:hidden" draggable="false" />
+        <template v-if="showLyrics">
+          <img v-if="art" :src="art" alt="" class="absolute inset-0 size-full scale-110 object-cover opacity-30 blur-2xl" draggable="false" />
+          <!-- A tap anywhere returns to the cover; the hidden button is the same for keyboards and screen readers -->
+          <div
+            role="region"
+            aria-label="Lyrics"
+            class="relative size-full overflow-y-auto overscroll-contain p-6 text-lg leading-relaxed font-semibold whitespace-pre-line"
+            :class="lyrics ? 'text-neutral-50' : 'grid place-items-center text-center text-base text-neutral-300'"
+            @click="showLyrics = false"
+          >
+            {{ lyricsText }}
+          </div>
+          <button type="button" class="sr-only" @click="showLyrics = false">Show cover</button>
+        </template>
+        <template v-else>
+          <!-- On wide screens the cover opens cover view; on a phone a tap shows the lyrics, when there are some -->
+          <button
+            v-if="art"
+            type="button"
+            class="hidden size-full md:block md:cursor-zoom-in"
+            aria-label="Show cover full screen"
+            @click="enterCoverView"
+          >
+            <img :src="art" alt="" class="size-full object-cover" draggable="false" />
+          </button>
+          <button v-if="lyrics" type="button" class="size-full md:hidden" aria-label="Show lyrics" @click="showLyrics = true">
+            <img v-if="art" :src="art" alt="" class="size-full object-cover" draggable="false" />
+          </button>
+          <img v-else-if="art" :src="art" alt="" class="size-full object-cover md:hidden" draggable="false" />
+          <span
+            v-if="lyrics"
+            class="pointer-events-none absolute right-3 bottom-3 grid size-8 place-items-center rounded-full bg-black/60 text-neutral-100 md:hidden"
+            aria-hidden="true"
+          >
+            <Icon name="lyrics" class="size-4" />
+          </span>
+        </template>
       </div>
 
       <div class="min-w-0">
@@ -361,14 +409,27 @@ function onTouchEnd(event: TouchEvent) {
             <span class="sr-only">Choose where to play. Now playing on</span>
             <span class="truncate">{{ getters.activeLabel.value }}</span>
           </button>
-          <button
-            type="button"
-            class="grid size-11 place-items-center rounded-full text-neutral-300 active:bg-neutral-800"
-            aria-label="Queue"
-            @click="emit('queue')"
-          >
-            <Icon name="queue" class="size-6" />
-          </button>
+          <div class="flex items-center gap-1">
+            <button
+              type="button"
+              class="hidden size-11 place-items-center rounded-full active:bg-neutral-800 disabled:opacity-40 md:grid"
+              :class="showLyrics ? 'text-accent' : 'text-neutral-300'"
+              aria-label="Lyrics"
+              :aria-pressed="showLyrics"
+              :disabled="!lyrics && !showLyrics"
+              @click="showLyrics = !showLyrics"
+            >
+              <Icon name="lyrics" class="size-6" />
+            </button>
+            <button
+              type="button"
+              class="grid size-11 place-items-center rounded-full text-neutral-300 active:bg-neutral-800"
+              aria-label="Queue"
+              @click="emit('queue')"
+            >
+              <Icon name="queue" class="size-6" />
+            </button>
+          </div>
         </div>
       </div>
     </fieldset>

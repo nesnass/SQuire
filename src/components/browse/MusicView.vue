@@ -9,6 +9,7 @@ import {
   fetchDecadeAlbums,
   fetchArtists,
   libraryTarget,
+  PLAYED_SORTS,
   type AlbumSort,
 } from '@/lms/library'
 import { groupBySection, indexOf, letterSections, type LetterSection } from '@/lms/sections'
@@ -33,7 +34,12 @@ const SORTS: { id: AlbumSort; label: string }[] = [
   { id: 'new', label: 'Recently added' },
   { id: 'album', label: 'Title' },
   { id: 'artistalbum', label: 'Artist' },
+  { id: 'popular', label: 'Most played' },
+  { id: 'recentlyplayed', label: 'Recently played' },
 ]
+const CAPPED: Partial<Record<AlbumSort, string>> = { new: 'most recently added' }
+// LMS indexes letters only for alphabetical sorts
+const ALPHABETICAL: readonly AlbumSort[] = ['album', 'artistalbum']
 const ROLES: { id: Role; label: string }[] = [
   { id: 'main', label: 'Album artists' },
   { id: 'composers', label: 'Composers' },
@@ -73,7 +79,7 @@ const albums = usePaged((start, n) =>
     ? fetchDecadeAlbums(period.value.value, { sort: sort.value, genreId: genreIds.value, compilation: compilation.value })
     : fetchAlbums(start, n, {
     sort: sort.value,
-    withIndex: start === 0 && sort.value !== 'new',
+    withIndex: start === 0 && ALPHABETICAL.includes(sort.value),
     genreId: genreIds.value,
     year: year.value ?? undefined,
     compilation: compilation.value,
@@ -86,8 +92,15 @@ const artists = usePaged(
 )
 
 const albumSections = computed(() => letterSections(albums.index.value))
-// LMS caps "Recently added" at its own setting (Settings › Interface), so the list may stop short of the library
-const recentCapped = computed(() => sort.value === 'new' && !filtered.value && albums.done.value)
+// LMS caps "Recently added" and the play history sorts at its own setting (Settings › Interface),
+// so the list may stop short of the library; play history sorts also leave out albums never played
+const listNote = computed(() => {
+  if (!albums.done.value || !albums.items.value.length) return ''
+  if (PLAYED_SORTS.includes(sort.value)) return 'Albums you’ve played, up to the number LMS sets in Settings › Interface.'
+  if (filtered.value) return ''
+  const what = CAPPED[sort.value]
+  return what ? `The ${albums.count.value} ${what} albums. LMS sets how many in Settings › Interface.` : ''
+})
 const albumGroups = computed(() => groupBySection(albums.items.value, albumSections.value))
 const artistSections = computed(() => letterSections(artists.index.value))
 const artistGroups = computed(() => groupBySection(artists.items.value, artistSections.value))
@@ -127,6 +140,11 @@ function applyFilters(f: AlbumFilters) {
 const sortLabel = computed(() => SORTS.find((s) => s.id === sort.value)?.label)
 const roleLabel = computed(() => ROLES.find((r) => r.id === role.value)?.label)
 const mixOn = computed(() => Boolean(getters.status.value?.randomplay))
+// The letter rail is fixed down the right edge and reaches the top row on short screens
+const railShown = computed(() => {
+  if (kind.value === 'albums') return albumSections.value.length > 1
+  return (role.value === 'main' ? artistSections.value : creditSections.value).length > 1
+})
 
 // Clearing every filter returns to the full list where it was left
 let savedScroll: number | null = null
@@ -289,7 +307,7 @@ const chipOff = 'border-neutral-700 text-neutral-300'
 
 <template>
   <div ref="root">
-    <div class="flex items-center justify-between gap-2 px-4 pt-4">
+    <div class="flex items-center justify-between gap-2 pt-4 pl-4" :class="railShown ? 'pr-10' : 'pr-4'">
       <div class="flex rounded-full bg-neutral-900 p-1" role="group" aria-label="Show">
         <button
           v-for="k in ['albums', 'artists'] as const"
@@ -385,9 +403,7 @@ const chipOff = 'border-neutral-700 text-neutral-300'
       <p v-if="albums.done.value && !albums.items.value.length" class="px-4 py-10 text-center text-neutral-400">
         No albums match
       </p>
-      <p v-else-if="recentCapped" class="px-4 pb-4 text-center text-sm text-neutral-400">
-        The {{ albums.count.value }} most recently added albums. LMS sets how many in Settings › Interface.
-      </p>
+      <p v-else-if="listNote" class="px-4 pb-4 text-center text-sm text-neutral-400">{{ listNote }}</p>
       <LoadMore :loading="albums.loading.value" :error="albums.error.value" :done="albums.done.value" @more="albums.more" />
       <LetterRail v-if="albumSections.length > 1" :sections="albumSections" @jump="jump(albums, 'albums', $event)" />
     </template>

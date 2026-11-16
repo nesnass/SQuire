@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { appearsOn } from '@/lms/credits'
+import { imageUrl } from '@/lms/format'
+import { fetchArtistPhotos, fetchBiography } from '@/lms/info'
 import { ALBUM_ARTIST_ROLES, fetchAlbums } from '@/lms/library'
 import type { Album } from '@/lms/types'
+import AboutSection from './AboutSection.vue'
 import AlbumTile from './AlbumTile.vue'
 import BackHeader from './BackHeader.vue'
 import PlayBar from './PlayBar.vue'
@@ -39,8 +42,22 @@ async function load() {
   }
 }
 
+// Looked up online by a plugin, so they arrive after the albums and are left out when not found
+const PORTRAIT_PX = 160
+const biography = ref<string | null>(null)
+const photos = ref<string[]>([])
+async function loadAbout() {
+  const [bio, pics] = await Promise.all([
+    fetchBiography(props.id).catch(() => null),
+    fetchArtistPhotos(props.id).catch(() => []),
+  ])
+  biography.value = bio
+  photos.value = pics
+}
+
 onMounted(() => {
   void load()
+  void loadAbout()
   heading.value?.focus()
 })
 </script>
@@ -48,13 +65,21 @@ onMounted(() => {
 <template>
   <article class="pb-6">
     <BackHeader :title="props.name" />
-    <header class="px-4 pt-2">
-      <h1 ref="heading" tabindex="-1" class="text-3xl font-bold outline-none">{{ props.name }}</h1>
-      <p v-if="own" class="text-sm text-neutral-400">
-        {{ own.length }} {{ own.length === 1 ? 'album' : 'albums' }}<template v-if="others.length">
-          · appears on {{ others.length }}</template
-        >
-      </p>
+    <header class="flex items-center gap-4 px-4 pt-2">
+      <img
+        v-if="photos[0]"
+        :src="imageUrl(photos[0], PORTRAIT_PX)"
+        alt=""
+        class="size-20 shrink-0 rounded-full bg-neutral-800 object-cover"
+      />
+      <div class="min-w-0">
+        <h1 ref="heading" tabindex="-1" class="text-3xl font-bold outline-none">{{ props.name }}</h1>
+        <p v-if="own" class="text-sm text-neutral-400">
+          {{ own.length }} {{ own.length === 1 ? 'album' : 'albums' }}<template v-if="others.length">
+            · appears on {{ others.length }}</template
+          >
+        </p>
+      </div>
     </header>
 
     <PlayBar
@@ -62,6 +87,15 @@ onMounted(() => {
       :favorite="favorite"
       more-label="More artist options"
       @more="openActions(target, { title: props.name }, { favorite, extra: [addToPlaylist] })"
+    />
+
+    <AboutSection
+      v-if="biography"
+      class="pb-4"
+      heading="About"
+      :title="`About ${props.name}`"
+      :text="biography"
+      :photos="photos"
     />
 
     <p v-if="error" class="flex items-center justify-center gap-3 px-4 py-10 text-sm text-neutral-400">
