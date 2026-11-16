@@ -65,8 +65,10 @@ function routeId(route: Route) {
 
 <template>
   <!-- Every level stays mounted with its own scroller, so going back keeps the scroll position.
-       Hidden levels use a class, not v-show, which TransitionGroup would animate. -->
-  <div class="relative h-full overflow-hidden">
+       Hidden levels use a class, not v-show, which TransitionGroup would animate.
+       Clipped rather than hidden: views focus their heading while still off to the side, and focus would
+       scroll an overflow-hidden box sideways mid-slide -->
+  <div class="relative h-full overflow-clip">
     <div
       ref="root"
       data-scroller
