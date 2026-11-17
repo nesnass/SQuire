@@ -11,19 +11,29 @@ const active = ref<{ letter: string; y: number } | null>(null)
 // The rail is fixed, so it's placed clear of the scroller's scrollbar and of the now playing column on wide screens
 const gutter = ref(0)
 let observer: ResizeObserver | undefined
+let measure = () => {}
 
 onMounted(() => {
   const scroller = rail.value?.closest<HTMLElement>('[data-scroller]')
   if (!scroller) return
-  // Distance from the window's right edge to the scroller's content: its scrollbar, plus any column beside it
-  const measure = () =>
+  // Distance from the layout viewport's right edge to the scroller's content: its scrollbar, plus any column beside it.
+  // Fixed elements sit on the layout viewport; window.innerWidth is the visual one, which pinch-zoom shrinks
+  measure = () =>
     (gutter.value =
-      window.innerWidth - scroller.getBoundingClientRect().right + scroller.offsetWidth - scroller.clientWidth)
+      document.documentElement.clientWidth -
+      scroller.getBoundingClientRect().right +
+      scroller.offsetWidth -
+      scroller.clientWidth)
   observer = new ResizeObserver(measure)
   observer.observe(scroller)
+  // The scroller can move without resizing, e.g. when the window leaves fullscreen
+  window.addEventListener('resize', measure)
   measure()
 })
-onBeforeUnmount(() => observer?.disconnect())
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  window.removeEventListener('resize', measure)
+})
 
 function pick(event: PointerEvent) {
   const box = rail.value?.getBoundingClientRect()
